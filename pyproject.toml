@@ -1,0 +1,24 @@
+[project]
+name = "widgetfusion-annotator"
+version = "0.1.0"
+description = "Multi-source desktop widget annotation: hover diff, YOLO, accessibility, and fusion"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { file = "LICENSE" }
+
+dependencies = [
+  "numpy",
+  "opencv-python",
+  "mss",
+  "PyQt6",
+  "pyautogui",
+  "pynput",
+  "ultralytics>=8.4.37",
+  "comtypes; sys_platform == 'win32'",
+]
+
+[project.scripts]
+widgetfusion-annotator = "widgetfusion_annotator:main"
+
+[tool.setuptools]
+py-modules = ["widgetfusion_annotator", "accessibility_boxes", "fusion_mode"]
