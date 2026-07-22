@@ -1374,6 +1374,7 @@ def on_combined_fusion_request() -> None:
             config.min_iou,
             config.min_sources,
             inclusion_coverage=config.inclusion_coverage,
+            source_priority=config.source_priority,
         )
         orphans = collect_orphan_boxes(hover, yolo, a11y, groups)
 

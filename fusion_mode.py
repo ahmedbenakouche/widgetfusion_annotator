@@ -160,11 +160,22 @@ def _index_all_boxes(
     hover_boxes: Sequence[Any],
     yolo_boxes: Sequence[Any],
     a11y_boxes: Sequence[Any],
+    source_priority: Sequence[Source] | None = None,
 ) -> list[tuple[Source, int, Any]]:
+    """Index boxes with anchors ordered by source priority (highest first)."""
+    by_source: dict[Source, Sequence[Any]] = {
+        "hover": hover_boxes,
+        "yolo": yolo_boxes,
+        "a11y": a11y_boxes,
+    }
+    priority = tuple(source_priority or SOURCE_PRIORITY)
     indexed: list[tuple[Source, int, Any]] = []
-    indexed.extend(_index_boxes("hover", hover_boxes))
-    indexed.extend(_index_boxes("yolo", yolo_boxes))
-    indexed.extend(_index_boxes("a11y", a11y_boxes))
+    for source in priority:
+        indexed.extend(_index_boxes(source, by_source.get(source, ())))
+    # Any source missing from priority (shouldn't happen) — append last.
+    for source, boxes in by_source.items():
+        if source not in priority:
+            indexed.extend(_index_boxes(source, boxes))
     return indexed
 
 
@@ -175,12 +186,16 @@ def build_fusion_groups(
     min_iou: float,
     min_sources: int = 2,
     inclusion_coverage: float = DEFAULT_INCLUSION_COVERAGE,
+    source_priority: Sequence[Source] | None = None,
 ) -> list[Cluster]:
     """
     Match widgets without transitive clustering.
-    Each group = one anchor bbox + other sources that match it directly.
+    Anchors are visited in source_priority order so the preferred source
+    claims matches first.
     """
-    indexed = _index_all_boxes(hover_boxes, yolo_boxes, a11y_boxes)
+    indexed = _index_all_boxes(
+        hover_boxes, yolo_boxes, a11y_boxes, source_priority=source_priority
+    )
     if not indexed:
         return []
 
@@ -313,6 +328,7 @@ def auto_fuse_boxes(
         min_iou,
         min_sources,
         inclusion_coverage=inclusion_coverage,
+        source_priority=priority,
     )
     fused = fuse_groups_auto(groups, priority)
     if include_orphans:
