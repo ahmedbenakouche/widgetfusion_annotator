@@ -1,7 +1,3 @@
-import pyautogui
-pyautogui.FAILSAFE = False
-pyautogui.PAUSE = 0
-
 import numpy as np
 import sys
 import cv2
@@ -50,65 +46,54 @@ mss_local = threading.local()
 # ─────────────────────────────────────────────
 # CONFIG
 # ─────────────────────────────────────────────
-# Safety margin (in pixels) added around the rectangles drawn by the overlay.
-OVERLAY_IGNORE_MARGIN = 0 # Widens the "eraser" to prevent the script from detecting its own drawings if pixels bleed (e.g., due to anti-aliasing).
+# Margin around overlay rects so screen-diff ignores anti-aliased edges.
+OVERLAY_IGNORE_MARGIN = 0
 DIFF_THRESHOLD = 0
 OUTPUT_DIR = os.path.join(os.path.expanduser("~"), "Desktop", "annotations")
 
 OVERLAY_COLOR = QColor(0, 255, 0, 220)
-YOLO_DISPLAY_COLOR = QColor(255, 140, 0, 220)  # orange — raw YOLO boxes (L session)
-A11Y_DISPLAY_COLOR = QColor(0, 120, 255, 220)    # blue — accessibility boxes (G session)
-FUSED_DISPLAY_COLOR = QColor(255, 255, 255, 230)   # white — fused boxes (combined mode)
+YOLO_DISPLAY_COLOR = QColor(255, 140, 0, 220)
+A11Y_DISPLAY_COLOR = QColor(0, 120, 255, 220)
+FUSED_DISPLAY_COLOR = QColor(255, 255, 255, 230)
 OVERLAY_LINE_WIDTH = 0
 OVERLAY_REFRESH_MS = 30
 LOOP_SLEEP = 0.01
 
-# If a new diff region appears away from the cursor, treat it as transient UI (e.g. tooltip)
-# and ignore it until it disappears.
+# Ignore transient UI (tooltips) that appear away from the cursor.
 IGNORE_NEW_DIFF_AWAY_FROM_CURSOR = True
-NEW_DIFF_MIN_AREA = 25  # px (ignore tiny noise)
-NEW_DIFF_DILATE = 2     # px (make ignoring a bit safer)
+NEW_DIFF_MIN_AREA = 25
+NEW_DIFF_DILATE = 2
 
-# extract_box(): smooth diff mask + reject merged L-shapes via solidity (contour_area / hull_area).
-EXTRACT_BOX_MORPH_CLOSE_K = 3   # odd kernel size (morphological closing)
+# extract_box: morph close + reject concave merges via solidity.
+EXTRACT_BOX_MORPH_CLOSE_K = 3
 EXTRACT_BOX_MORPH_CLOSE_ITER = 1
-EXTRACT_BOX_MIN_SOLIDITY = 0.92  # below => likely concave merge (e.g. hover+tooltip)
+EXTRACT_BOX_MIN_SOLIDITY = 0.92
 
 # ─────────────────────────────────────────────
 # YOLO (optional autoscan)
 # ─────────────────────────────────────────────
 YOLO_MODEL_PATH = "yolo26n-1280.pt"
 YOLO_CONF = 0.4
-
-# For each YOLO bbox, move the cursor to the center only.
 YOLO_HOVER_POINTS = ("center",)
-
-# Row grouping tolerance for "line-by-line" scan order (pixels).
-# Boxes with similar vertical centers fall into the same row.
 YOLO_ROW_BIN_PX = 60
-
-# Delay between cursor moves (seconds). Keep small: just enough for hover to trigger.
 YOLO_MOVE_DELAY_S = 0.5
 
 
 # ─────────────────────────────────────────────
 # STATE GLOBAL
 # ─────────────────────────────────────────────
-# Shared state across threads (watcher + Qt UI + keyboard).
 EXIT_PROGRAM = False
 RUNNING = False
 initial_img = None
 
-# Y mode only: moves cursor automatically over YOLO detections to trigger hover diff.
 YOLO_AUTOSCAN = False
 A11Y_SCAN_PENDING = False
 yolo_model = None
 
-# WidgetFusion session (hover + YOLO + accessibility + review/fusion).
 COMBINED_MODE = False
-COMBINED_PHASE = ""  # hover | yolo | a11y | review
+COMBINED_PHASE = ""
 COMBINED_CONFIG: CombinedModeConfig | None = None
-COMBINED_VIEW = "all"  # hover | yolo | a11y | all | fused
+COMBINED_VIEW = "all"
 COMBINED_AUTO_FUSED = False
 COMBINED_PHASES_PENDING: list[str] = []
 combined_hover_boxes: list = []
@@ -116,28 +101,24 @@ combined_yolo_boxes: list = []
 combined_a11y_boxes: list = []
 combined_fused_boxes: list = []
 
-# Overlay highlight during manual fusion wizard (source picked in dialog).
 COMBINED_FUSION_HIGHLIGHT_IDX = -1
 COMBINED_FUSION_HIGHLIGHT_CLUSTERS: list = []
 
-# Manual annotation mode (draw boxes by mouse drag on overlay).
 MANUAL_MODE = False
-manual_drag_start = None  # (x, y) in capture coordinates
-manual_preview_box = None  # (x, y, w, h) in capture coordinates
-manual_selected_index = None  # int index in raw_boxes
-manual_edit_mode = None  # None | "move" | "resize"
-manual_edit_anchor = None  # (x, y) capture coords at press time
-manual_edit_origin_box = None  # (x, y, w, h) box at press time
-manual_edit_edges = None  # set[str] for resize ("left","right","top","bottom")
+manual_drag_start = None
+manual_preview_box = None
+manual_selected_index = None
+manual_edit_mode = None
+manual_edit_anchor = None
+manual_edit_origin_box = None
+manual_edit_edges = None
 
-MANUAL_HANDLE_RADIUS = 8  # px in capture coordinates
+MANUAL_HANDLE_RADIUS = 8
 _manual_cursor_override_active = False
 
-# Guards access to RUNNING/initial_img.
 state_lock = threading.Lock()
 
-# Capture geometry in MSS pixel coordinates (used to scale overlay and map cursor).
-# These defaults are overwritten as soon as the first MSS grab happens.
+# Capture geometry in MSS coordinates (updated on first grab).
 CAPTURE_LEFT = 0
 CAPTURE_TOP = 0
 CAPTURE_W, CAPTURE_H = 1, 1
@@ -222,7 +203,6 @@ class OverlayWindow(QWidget):
             | Qt.WindowType.Tool
         )
         if sys.platform.startswith("linux"):
-            # Avoid window manager interference on some X11 setups.
             self._base_flags |= Qt.WindowType.X11BypassWindowManagerHint
 
         self.setAutoFillBackground(False)
@@ -230,11 +210,9 @@ class OverlayWindow(QWidget):
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
         self.set_click_through(True)
 
-        # Full-screen overlay on primary display.
         screen = QApplication.primaryScreen()
         self.setGeometry(screen.geometry())
 
-        # Periodically repaint to reflect updated boxes.
         self.timer = QTimer(self)
         self.timer.timeout.connect(self.update)
         self.timer.start(OVERLAY_REFRESH_MS)
@@ -244,11 +222,10 @@ class OverlayWindow(QWidget):
         if enabled:
             flags |= Qt.WindowType.WindowTransparentForInput
         self.setWindowFlags(flags)
-        # Re-apply attributes because setWindowFlags can reset some platform state.
+        # setWindowFlags can reset attributes / geometry on some platforms.
         self.setAutoFillBackground(False)
         self.setAttribute(Qt.WidgetAttribute.WA_NoSystemBackground, True)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
-        # Ensure we stay full-screen after flag changes (some platforms reset geometry).
         screen = QApplication.primaryScreen()
         if screen is not None:
             self.setGeometry(screen.geometry())
@@ -280,8 +257,7 @@ class OverlayWindow(QWidget):
         x0, y0 = bx, by
         x1, y1 = bx + bw, by + bh
 
-        # Require proximity on one axis AND alignment within the span on the other axis.
-        # This avoids selecting far-away boxes just because x matches an edge.
+        # Edge hit needs proximity on one axis and alignment on the other.
         within_y = (y0 - r) <= y <= (y1 + r)
         within_x = (x0 - r) <= x <= (x1 + r)
 
@@ -324,7 +300,6 @@ class OverlayWindow(QWidget):
             if COMBINED_MODE and not combined_manual_editing_allowed(COMBINED_PHASE, COMBINED_VIEW):
                 return
 
-        # Right-click inside the selected bbox removes it (manual mode only).
         if event.button() == Qt.MouseButton.RightButton:
             x, y = self._overlay_to_capture(event.position().x(), event.position().y())
             with state_lock:
@@ -352,7 +327,6 @@ class OverlayWindow(QWidget):
         with state_lock:
             boxes = active_boxes_list()[:]
 
-        # Prefer editing an existing box if click hits it.
         hit_index = None
         hit_mode = None
         hit_edges = set()
@@ -375,7 +349,6 @@ class OverlayWindow(QWidget):
             self.update()
             return
 
-        # Otherwise create a new box.
         with state_lock:
             manual_selected_index = None
             manual_edit_mode = None
@@ -405,7 +378,6 @@ class OverlayWindow(QWidget):
 
         x1, y1 = self._overlay_to_capture(event.position().x(), event.position().y())
 
-        # Editing an existing box.
         if selected is not None and edit_mode is not None and anchor is not None and origin is not None:
             ax, ay = anchor
             ox, oy, ow, oh = origin
@@ -424,7 +396,6 @@ class OverlayWindow(QWidget):
                 ny = min(ny, CAPTURE_H - oh)
                 new_box = (int(nx), int(ny), int(ow), int(oh))
             else:
-                # Resize: adjust sides based on which edges are active.
                 left = ox
                 top = oy
                 right = ox + ow
@@ -439,7 +410,6 @@ class OverlayWindow(QWidget):
                 if "bottom" in edges:
                     bottom = oy + oh + dy
 
-                # Normalize and clamp.
                 x_min = int(max(0, min(left, right)))
                 x_max = int(min(CAPTURE_W - 1, max(left, right)))
                 y_min = int(max(0, min(top, bottom)))
@@ -464,7 +434,6 @@ class OverlayWindow(QWidget):
             self.update()
             return
 
-        # Creating a new box.
         if drag_start is None:
             return
         x0, y0 = drag_start
@@ -488,7 +457,6 @@ class OverlayWindow(QWidget):
         if event.button() != Qt.MouseButton.LeftButton:
             return
 
-        # Finish editing if we were editing.
         with state_lock:
             if manual_edit_mode is not None:
                 manual_edit_mode = None
@@ -538,14 +506,12 @@ class OverlayWindow(QWidget):
             )
 
         painter = QPainter(self)
-        # Always clear with transparent background to avoid black/opaque artifacts.
         painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_Source)
         painter.fillRect(self.rect(), QColor(0, 0, 0, 0))
         painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_SourceOver)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, False)
 
-        # Windows hit-testing: fully transparent pixels may not receive mouse events.
-        # In manual mode we draw an almost-transparent full-screen layer so mouse drag works everywhere.
+        # Manual mode: near-opaque full-screen fill so Windows hit-tests receive mouse events.
         if manual:
             painter.fillRect(self.rect(), QColor(0, 0, 0, 1))
 
@@ -555,7 +521,6 @@ class OverlayWindow(QWidget):
             painter.end()
             return
 
-        # Map capture coordinates → current overlay window coordinates.
         sx = self.width() / CAPTURE_W
         sy = self.height() / CAPTURE_H
 
@@ -673,12 +638,7 @@ def capture_to_screen_coords(x, y):
 
 
 def move_cursor_system(x_screen: int, y_screen: int):
-    """
-    Move the system cursor using a low-level event on Windows (SendInput).
-    We use ctypes(SendInput) here because, as we noticed, on the Windows taskbar some hovers do not respond
-    to simply setting mouse position (via pynput); SendInput simulates a real system movement.
-    Fallback to pynput on other OSes.
-    """
+    """Move system cursor; on Windows use SendInput (taskbar hovers ignore pynput)."""
     if sys.platform.startswith("win"):
         import ctypes
         user32 = ctypes.windll.user32
@@ -688,7 +648,7 @@ def move_cursor_system(x_screen: int, y_screen: int):
             mouse_controller.position = (x_screen, y_screen)
             return
 
-        # Convert pixel coords to absolute 0..65535 (required by SendInput).
+        # SendInput absolute coords are in 0..65535.
         abs_x = int(x_screen * 65535 / (screen_w - 1))
         abs_y = int(y_screen * 65535 / (screen_h - 1))
 
@@ -779,9 +739,7 @@ def yolo_infer_boxes_bgr(image_bgr):
         h = max(1, abs(y2 - y1))
         boxes.append((x, y, w, h))
 
-    # Start scanning from the top-right area of the screen, line-by-line.
-    # Direct sorting by y can look random because y differs slightly between boxes.
-    # We group boxes into rows using a Y "bin" based on the vertical center.
+    # Row bins + right-to-left so slight y jitter doesn't scramble scan order.
     def sort_key(b):
         x, y, w, h = b
         y_center = y + h / 2.0
@@ -861,7 +819,6 @@ def extract_box(mask):
 
         x, y, w, h = cv2.boundingRect(c)
 
-        # Keep only regions containing the cursor.
         inside_dist = cv2.pointPolygonTest(c, (float(cx), float(cy)), True)
         if inside_dist >= 0:
             candidates.append((inside_dist, (int(x), int(y), int(w), int(h))))
@@ -869,7 +826,6 @@ def extract_box(mask):
     if not candidates:
         return None
 
-    # Prefer deepest point inside contour, then bigger rect (tuple fallback).
     candidates.sort(key=lambda t: (t[0], t[1]), reverse=True)
     return candidates[0][1]
 
@@ -935,7 +891,6 @@ def build_overlay_mask(shape):
         x, y, w, h = box_coords(item)
         cv2.rectangle(mask, (x, y), (x + w, y + h), 255, thickness=thickness)
 
-    # Small dilation to cover captured borders.
     kernel = np.ones((3, 3), np.uint8)
     mask = cv2.dilate(mask, kernel, iterations=1)
 
@@ -957,12 +912,12 @@ def remove_overlay_from_current(base_img, current_img):
 # ─────────────────────────────────────────────
 # SAUVEGARDE
 # ─────────────────────────────────────────────
-# OpenCV BGR colors matching overlay QColor (RGB).
+# BGR colors matching overlay QColor (RGB).
 _SAVE_BGR_COLORS = {
-    "hover": (0, 255, 0),       # green
-    "yolo": (0, 140, 255),      # orange
-    "a11y": (255, 120, 0),      # blue
-    "fused": (255, 255, 255),   # white
+    "hover": (0, 255, 0),
+    "yolo": (0, 140, 255),
+    "a11y": (255, 120, 0),
+    "fused": (255, 255, 255),
 }
 
 
@@ -1128,7 +1083,6 @@ def screen_watcher():
         current_clean = remove_overlay_from_current(base_img, current)
         mask_raw = compute_diff(base_img, current_clean)
 
-        # Ignore newly appearing diff regions away from cursor (e.g. tooltip popups).
         if IGNORE_NEW_DIFF_AWAY_FROM_CURSOR:
             if ignored_transient_mask is None or ignored_transient_mask.shape != mask_raw.shape:
                 ignored_transient_mask = np.zeros(mask_raw.shape, dtype=np.uint8)
@@ -1141,12 +1095,9 @@ def screen_watcher():
                     for c in contours:
                         if cv2.contourArea(c) < NEW_DIFF_MIN_AREA:
                             continue
-
-                        # If cursor is NOT inside the newly appeared region, mark it as transient to ignore.
                         if not cursor_inside_contour(c, cx, cy):
                             cv2.drawContours(ignored_transient_mask, [c], -1, 255, thickness=-1)
 
-            # Keep ignoring only while the region is still different.
             ignored_transient_mask = cv2.bitwise_and(ignored_transient_mask, mask_raw)
 
             if NEW_DIFF_DILATE > 0 and np.any(ignored_transient_mask):

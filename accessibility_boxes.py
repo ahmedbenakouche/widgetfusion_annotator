@@ -5,7 +5,7 @@ from __future__ import annotations
 import sys
 from typing import Any, List, Tuple, TypedDict
 
-Box = Tuple[int, int, int, int]  # x, y, w, h in MSS capture coordinates
+Box = Tuple[int, int, int, int]
 
 
 class A11yWidget(TypedDict):
@@ -13,25 +13,22 @@ class A11yWidget(TypedDict):
     y: int
     w: int
     h: int
-    control_type: str       # UIA type name, e.g. "Button", "Edit"
-    control_type_id: int    # UIA numeric id, e.g. 50000
-    class_name: str         # Win32 / framework class, e.g. "Button"
-    name: str               # accessible label (CurrentName), may be empty
+    control_type: str
+    control_type_id: int
+    class_name: str
+    name: str
 
 
 DEFAULT_MIN_BOX_AREA = 25
 
 # Optional allowlist of UIA control_type names; None = keep all.
-# Example: {"Button", "Edit", "CheckBox", "ComboBox", "Hyperlink", "MenuItem"}
 A11Y_CONTROL_TYPE_ALLOWLIST: set[str] | None = None
 
-# UIA control_type roles kept as annotatable widgets (universal, not app-specific).
-# Text/Image included: taskbar icons, weather widget fragments, etc.
 CLICKABLE_CONTROL_TYPES = frozenset({
     "Button",
     "CheckBox",
     "ComboBox",
-    "Custom",       # app-defined controls (often interactive)
+    "Custom",
     "DataItem",
     "Edit",
     "HeaderItem",
@@ -92,14 +89,9 @@ UIA_CONTROL_TYPE_NAMES: dict[int, str] = {
     50036: "Table",
     50037: "TitleBar",
     50038: "Separator",
-    50039: "SemanticZoom",  # Windows 8+, UIAutomationClient.h
-    50040: "AppBar",        # Windows 8.1+, UIAutomationClient.h
+    50039: "SemanticZoom",
+    50040: "AppBar",
 }
-
-# Structural / layout containers — derived from UIA_CONTROL_TYPE_NAMES minus clickable.
-NON_CLICKABLE_CONTROL_TYPES = frozenset(
-    name for name in UIA_CONTROL_TYPE_NAMES.values() if name not in CLICKABLE_CONTROL_TYPES
-)
 
 
 # ─────────────────────────────────────────────
@@ -205,7 +197,7 @@ def _runtime_id_key(element) -> tuple:
 
 
 # ─────────────────────────────────────────────
-# Widget bbox filtering — control types + nested dedup (NOT window scope)
+# Widget bbox filtering
 # ─────────────────────────────────────────────
 
 
@@ -437,7 +429,7 @@ def _hwnd_is_visually_exposed(
 
 
 # ─────────────────────────────────────────────
-# Window scope — which top-level windows to scan (NOT widget bbox rules)
+# Window scope
 # ─────────────────────────────────────────────
 
 

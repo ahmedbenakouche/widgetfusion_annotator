@@ -6,7 +6,7 @@ import json
 import os
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any, Iterable, List, Literal, Sequence, Tuple
+from typing import Any, Iterable, Literal, Sequence, Tuple
 
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import (
@@ -35,17 +35,8 @@ Box = Tuple[int, int, int, int]
 Source = Literal["hover", "yolo", "a11y"]
 Layer = Literal["hover", "yolo", "a11y", "fused"]
 View = Literal["hover", "yolo", "a11y", "all", "fused"]
-Phase = Literal["hover", "yolo", "a11y", "review", ""]
 
 SOURCE_PRIORITY: tuple[Source, ...] = ("a11y", "hover", "yolo")
-
-VIEW_LABELS: dict[str, str] = {
-    "hover": "hover (vert)",
-    "yolo": "YOLO (orange)",
-    "a11y": "accessibilité (bleu)",
-    "all": "3 superposées (lecture seule)",
-    "fused": "fusion (blanc)",
-}
 
 SOURCE_LABELS: dict[Source, str] = {
     "hover": "Hover (vert)",
@@ -55,9 +46,7 @@ SOURCE_LABELS: dict[Source, str] = {
 
 Cluster = list[tuple[Source, int, Any]]
 
-# Defaults used in fusion dialog (user can change before merging).
 DEFAULT_FUSION_MIN_IOU = 0.5
-# Soft inclusion: fraction of the *smaller* box that must lie in the intersection.
 DEFAULT_INCLUSION_COVERAGE = 0.9
 
 
@@ -172,7 +161,6 @@ def _index_all_boxes(
     indexed: list[tuple[Source, int, Any]] = []
     for source in priority:
         indexed.extend(_index_boxes(source, by_source.get(source, ())))
-    # Any source missing from priority (shouldn't happen) — append last.
     for source, boxes in by_source.items():
         if source not in priority:
             indexed.extend(_index_boxes(source, boxes))
@@ -282,7 +270,6 @@ def resolve_fused_box(cluster: Cluster, chosen_source: Source) -> Any:
     """
     geom = cluster_box_for_source(cluster, chosen_source)
     if geom is None:
-        # Fallback: first box in cluster
         geom = cluster[0][2]
     x, y, w, h = box_coords(geom)
     meta = cluster_a11y_metadata(cluster)
@@ -307,33 +294,6 @@ def cluster_union_rect(cluster: Cluster) -> Box:
         y2s.append(y + h)
     x0, y0 = min(xs), min(ys)
     return (x0, y0, max(x2s) - x0, max(y2s) - y0)
-
-
-def auto_fuse_boxes(
-    hover_boxes: Sequence[Any],
-    yolo_boxes: Sequence[Any],
-    a11y_boxes: Sequence[Any],
-    min_iou: float,
-    min_sources: int = 2,
-    source_priority: Sequence[Source] | None = None,
-    inclusion_coverage: float = DEFAULT_INCLUSION_COVERAGE,
-    include_orphans: bool = True,
-) -> list[Any]:
-    """Fuse boxes agreed on by multiple methods; pick geometry by priority."""
-    priority = tuple(source_priority or SOURCE_PRIORITY)
-    groups = build_fusion_groups(
-        hover_boxes,
-        yolo_boxes,
-        a11y_boxes,
-        min_iou,
-        min_sources,
-        inclusion_coverage=inclusion_coverage,
-        source_priority=priority,
-    )
-    fused = fuse_groups_auto(groups, priority)
-    if include_orphans:
-        fused.extend(collect_orphan_boxes(hover_boxes, yolo_boxes, a11y_boxes, groups))
-    return fused
 
 
 def combined_effective_layer(phase: str, view: str) -> Layer | None:
@@ -821,7 +781,7 @@ SAVE_LAYER_LABELS: dict[str, str] = {
 class SaveSelection:
     sources: list[str] = field(default_factory=list)
     output_dir: str = "annotations"
-    separate_files: bool = False
+    separate_files: bool = True
 
 
 @dataclass
@@ -926,7 +886,7 @@ class SaveConfigDialog(QDialog):
         self._separate_cb = QCheckBox(
             "Fichiers séparés par source (un JSON + image annotée par case cochée)"
         )
-        self._separate_cb.setChecked(False)
+        self._separate_cb.setChecked(True)
         self._separate_cb.setEnabled(len(self._checks) > 1)
         self._separate_cb.stateChanged.connect(self._refresh_preview)
         layout.addWidget(self._separate_cb)
@@ -1066,7 +1026,3 @@ def cycle_view(view: View, backward: bool = False) -> View:
         idx = 0
     idx = (idx - 1) if backward else (idx + 1)
     return order[idx % len(order)]
-
-
-def view_label(view: str) -> str:
-    return VIEW_LABELS.get(view, view)
