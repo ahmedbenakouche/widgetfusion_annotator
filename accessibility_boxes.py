@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import sys
-from typing import Any, List, Tuple, TypedDict
+from typing import Any, List, Sequence, Tuple, TypedDict
 
 Box = Tuple[int, int, int, int]
 
@@ -18,8 +18,6 @@ class A11yWidget(TypedDict):
     class_name: str
     name: str
 
-
-DEFAULT_MIN_BOX_AREA = 25
 
 # Optional allowlist of UIA control_type names; None = keep all.
 A11Y_CONTROL_TYPE_ALLOWLIST: set[str] | None = None
@@ -123,20 +121,32 @@ def get_accessibility_boxes(
     capture_top: int,
     capture_width: int,
     capture_height: int,
-    min_area: int = DEFAULT_MIN_BOX_AREA,
 ) -> List[A11yWidget]:
-    """Return visible accessibility widgets inside the capture region."""
+    """Return accessibility widgets after default filters (clickable + parent inclusion)."""
+    raw = get_accessibility_boxes_raw(
+        capture_left, capture_top, capture_width, capture_height
+    )
+    return apply_a11y_filters(raw)
+
+
+def get_accessibility_boxes_raw(
+    capture_left: int,
+    capture_top: int,
+    capture_width: int,
+    capture_height: int,
+) -> List[A11yWidget]:
+    """Return unfiltered accessibility widgets inside the capture region."""
     if sys.platform == "win32":
         return _get_boxes_windows(
-            capture_left, capture_top, capture_width, capture_height, min_area
+            capture_left, capture_top, capture_width, capture_height
         )
     if sys.platform.startswith("linux"):
         return _get_boxes_linux(
-            capture_left, capture_top, capture_width, capture_height, min_area
+            capture_left, capture_top, capture_width, capture_height
         )
     if sys.platform == "darwin":
         return _get_boxes_darwin(
-            capture_left, capture_top, capture_width, capture_height, min_area
+            capture_left, capture_top, capture_width, capture_height
         )
 
     print(f"[WARN] Accessibility boxes are not supported on platform: {sys.platform}")
@@ -214,42 +224,39 @@ def _box_contains(outer: Box | A11yWidget, inner: Box | A11yWidget, margin: int 
     )
 
 
-def _is_clickable(widget: A11yWidget) -> bool:
-    return widget.get("control_type") in CLICKABLE_CONTROL_TYPES
-
-
-def _suppress_clickable_children_inside_clickable_parents(boxes: List[A11yWidget]) -> List[A11yWidget]:
-    """Keep the outer clickable widget when it fully contains another clickable child."""
+def _suppress_contained_children(boxes: List[A11yWidget]) -> List[A11yWidget]:
+    """Drop widgets fully contained inside another kept widget."""
     drop: set[int] = set()
     for i, parent in enumerate(boxes):
-        if not _is_clickable(parent):
-            continue
         for j, child in enumerate(boxes):
             if i == j or j in drop:
                 continue
-            if not _is_clickable(child):
-                continue
             if _box_contains(parent, child):
                 drop.add(j)
-
     return [box for i, box in enumerate(boxes) if i not in drop]
 
 
+def apply_a11y_filters(
+    boxes: Sequence[A11yWidget] | List[A11yWidget],
+    enabled_types: set[str] | frozenset[str] | None = None,
+    parent_inclusion: bool = True,
+) -> List[A11yWidget]:
+    """Filter raw UIA widgets by control type and optional parent-child inclusion."""
+    types = set(CLICKABLE_CONTROL_TYPES) if enabled_types is None else set(enabled_types)
+    if A11Y_CONTROL_TYPE_ALLOWLIST is not None:
+        types &= A11Y_CONTROL_TYPE_ALLOWLIST
+
+    filtered = [b for b in boxes if str(b.get("control_type") or "") in types]
+    if parent_inclusion:
+        filtered = _suppress_contained_children(filtered)
+    return filtered
+
+
 def filter_widget_boxes(boxes: List[A11yWidget]) -> tuple[List[A11yWidget], str]:
-    """Apply widget bbox filters only (parent-priority dedup)."""
-    filtered = _suppress_clickable_children_inside_clickable_parents(boxes)
+    """Apply default parent-priority dedup (legacy helper)."""
+    filtered = _suppress_contained_children(boxes)
     summary = f"{len(boxes)} -> {len(filtered)} (parent-priority)"
     return filtered, summary
-
-
-def _passes_widget_control_type_filter(metadata: dict[str, Any]) -> bool:
-    """Widget bbox filter at collection time: clickable UIA roles only."""
-    control_type = str(metadata.get("control_type") or "")
-    if control_type not in CLICKABLE_CONTROL_TYPES:
-        return False
-    if A11Y_CONTROL_TYPE_ALLOWLIST is not None:
-        return control_type in A11Y_CONTROL_TYPE_ALLOWLIST
-    return True
 
 
 def _screen_rect_to_capture_box(
@@ -261,9 +268,8 @@ def _screen_rect_to_capture_box(
     capture_top: int,
     capture_width: int,
     capture_height: int,
-    min_area: int,
 ) -> Box | None:
-    if width <= 0 or height <= 0 or width * height < min_area:
+    if width <= 0 or height <= 0:
         return None
 
     x = left - capture_left
@@ -275,11 +281,7 @@ def _screen_rect_to_capture_box(
     width = x2 - x
     height = y2 - y
 
-    if width <= 0 or height <= 0 or width * height < min_area:
-        return None
-
-    capture_area = max(1, capture_width * capture_height)
-    if width * height >= capture_area * 0.95:
+    if width <= 0 or height <= 0:
         return None
 
     return (int(x), int(y), int(width), int(height))
@@ -530,7 +532,6 @@ def _collect_uia_boxes(
     capture_top: int,
     capture_width: int,
     capture_height: int,
-    min_area: int,
     seen: set[Box] | None = None,
 ) -> List[A11yWidget]:
     boxes: List[A11yWidget] = []
@@ -551,9 +552,6 @@ def _collect_uia_boxes(
         if not skip_box:
             try:
                 metadata = _element_metadata(element)
-                if not _passes_widget_control_type_filter(metadata):
-                    raise RuntimeError("skip type")
-
                 parsed = _parse_bounding_rect(element.CurrentBoundingRectangle)
                 if parsed is not None:
                     box = _screen_rect_to_capture_box(
@@ -562,7 +560,6 @@ def _collect_uia_boxes(
                         capture_top=capture_top,
                         capture_width=capture_width,
                         capture_height=capture_height,
-                        min_area=min_area,
                     )
                     if box is not None and box not in seen:
                         seen.add(box)
@@ -574,8 +571,6 @@ def _collect_uia_boxes(
                             "h": h,
                             **metadata,
                         })
-            except RuntimeError:
-                pass
             except Exception:
                 pass
 
@@ -597,7 +592,6 @@ def _get_boxes_windows(
     capture_top: int,
     capture_width: int,
     capture_height: int,
-    min_area: int,
 ) -> List[A11yWidget]:
     """Enumerate UI Automation widgets for visible top-level windows (Windows UIA)."""
     try:
@@ -652,17 +646,12 @@ def _get_boxes_windows(
                 capture_top,
                 capture_width,
                 capture_height,
-                min_area,
                 seen=seen,
             )
         )
 
     print(f"[INFO] Widgets collectés (brut): {len(boxes)} bbox", flush=True)
-
-    filtered, filter_summary = filter_widget_boxes(boxes)
-    if len(filtered) != len(boxes):
-        print(f"[INFO] Filtre bbox widgets: {filter_summary}", flush=True)
-    return filtered
+    return boxes
 
 
 def _get_boxes_linux(
@@ -670,7 +659,6 @@ def _get_boxes_linux(
     capture_top: int,
     capture_width: int,
     capture_height: int,
-    min_area: int,
 ) -> List[A11yWidget]:
     # TODO: AT-SPI2 / a11y bus (Linux).
     print("[WARN] Accessibility boxes are not implemented on Linux yet.")
@@ -682,7 +670,6 @@ def _get_boxes_darwin(
     capture_top: int,
     capture_width: int,
     capture_height: int,
-    min_area: int,
 ) -> List[A11yWidget]:
     # TODO: macOS Accessibility API (AXUIElementCopyAttributeValue).
     print("[WARN] Accessibility boxes are not implemented on macOS yet.")

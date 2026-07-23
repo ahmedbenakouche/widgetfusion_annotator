@@ -9,7 +9,12 @@ from datetime import datetime
 from pynput import keyboard, mouse
 from ultralytics import YOLO
 
-from accessibility_boxes import get_accessibility_boxes, a11y_box_coords, make_manual_a11y_widget
+from accessibility_boxes import (
+    get_accessibility_boxes_raw,
+    apply_a11y_filters,
+    a11y_box_coords,
+    make_manual_a11y_widget,
+)
 from fusion_mode import (
     CombinedModeConfig,
     SOURCE_LABELS,
@@ -28,6 +33,7 @@ from fusion_mode import (
     show_session_config_dialog,
     show_fusion_config_dialog,
     show_save_config_dialog,
+    show_a11y_filter_dialog,
 )
 
 # Silence a noisy non-blocking Qt warning on Windows.
@@ -99,6 +105,7 @@ COMBINED_PHASES_PENDING: list[str] = []
 combined_hover_boxes: list = []
 combined_yolo_boxes: list = []
 combined_a11y_boxes: list = []
+combined_a11y_raw_boxes: list = []
 combined_fused_boxes: list = []
 
 COMBINED_FUSION_HIGHLIGHT_IDX = -1
@@ -191,6 +198,7 @@ class AppBridge(QObject):
     session_config_signal = pyqtSignal()
     combined_fusion_signal = pyqtSignal()
     save_signal = pyqtSignal()
+    a11y_filter_signal = pyqtSignal()
 
 
 class OverlayWindow(QWidget):
@@ -971,7 +979,7 @@ def _end_session_after_save() -> None:
     """Clear session state after a successful save, then reopen config."""
     global RUNNING, YOLO_AUTOSCAN, A11Y_SCAN_PENDING
     global COMBINED_MODE, COMBINED_PHASE, COMBINED_CONFIG, COMBINED_VIEW, COMBINED_AUTO_FUSED
-    global combined_hover_boxes, combined_yolo_boxes, combined_a11y_boxes, combined_fused_boxes
+    global combined_hover_boxes, combined_yolo_boxes, combined_a11y_boxes, combined_a11y_raw_boxes, combined_fused_boxes
     global COMBINED_FUSION_HIGHLIGHT_IDX, COMBINED_FUSION_HIGHLIGHT_CLUSTERS
 
     with state_lock:
@@ -987,6 +995,7 @@ def _end_session_after_save() -> None:
         combined_hover_boxes = []
         combined_yolo_boxes = []
         combined_a11y_boxes = []
+        combined_a11y_raw_boxes = []
         combined_fused_boxes = []
 
     _fusion_wizard_highlight(-1, [])
@@ -1185,25 +1194,70 @@ def yolo_sweeper():
 
 def _a11y_scan_worker(capture_left, capture_top, capture_width, capture_height):
     """Run UI Automation scan off the main keyboard thread."""
-    global combined_a11y_boxes, A11Y_SCAN_PENDING
+    global combined_a11y_boxes, combined_a11y_raw_boxes, A11Y_SCAN_PENDING
 
     try:
-        boxes = get_accessibility_boxes(
+        raw = get_accessibility_boxes_raw(
             capture_left,
             capture_top,
             capture_width,
             capture_height,
-            min_area=NEW_DIFF_MIN_AREA,
         )
     except Exception as exc:
         print(f"[WARN] Accessibility scan failed: {exc}", flush=True)
-        boxes = []
+        raw = []
 
+    filtered = apply_a11y_filters(raw)
+    open_filter_ui = False
     with state_lock:
         if RUNNING and COMBINED_PHASE == "a11y":
-            combined_a11y_boxes = boxes
-            print(f"Accessibilité: {len(boxes)} box(es).", flush=True)
+            combined_a11y_raw_boxes = raw
+            combined_a11y_boxes = filtered
+            print(
+                f"Accessibilité: {len(filtered)} box(es) "
+                f"(filtre défaut, {len(raw)} brute(s)).",
+                flush=True,
+            )
+            open_filter_ui = True
         A11Y_SCAN_PENDING = False
+
+    if open_filter_ui and app_bridge is not None:
+        app_bridge.a11y_filter_signal.emit()
+
+
+def _preview_a11y_filters(filtered: list) -> None:
+    global combined_a11y_boxes
+    with state_lock:
+        combined_a11y_boxes = list(filtered)
+    if overlay_window is not None:
+        overlay_window.update()
+
+
+def on_a11y_filter_request() -> None:
+    """Qt-thread: open live a11y filter dialog after the raw scan."""
+    with state_lock:
+        if not (RUNNING and COMBINED_MODE and COMBINED_PHASE == "a11y"):
+            return
+        raw = combined_a11y_raw_boxes[:]
+
+    if overlay_window is not None:
+        overlay_window.set_click_through(True)
+
+    try:
+        filtered = show_a11y_filter_dialog(
+            raw_boxes=raw,
+            on_preview=_preview_a11y_filters,
+            parent=overlay_window,
+        )
+        _preview_a11y_filters(filtered)
+        print(f"Accessibilité: {len(filtered)} box(es) après filtres.", flush=True)
+    finally:
+        if overlay_window is not None:
+            overlay_window.set_click_through(not MANUAL_MODE)
+        _sync_manual_cursor()
+        if overlay_window is not None:
+            overlay_window.raise_()
+            overlay_window.update()
 
 
 def _print_combined_phase_help(phase: str) -> None:
@@ -1402,7 +1456,7 @@ def combined_cycle_view(backward: bool = False) -> None:
 def start_session(config: CombinedModeConfig) -> None:
     global RUNNING, initial_img, YOLO_AUTOSCAN
     global COMBINED_MODE, COMBINED_CONFIG, COMBINED_PHASES_PENDING, COMBINED_VIEW, COMBINED_AUTO_FUSED
-    global combined_hover_boxes, combined_yolo_boxes, combined_a11y_boxes, combined_fused_boxes
+    global combined_hover_boxes, combined_yolo_boxes, combined_a11y_boxes, combined_a11y_raw_boxes, combined_fused_boxes
     global COMBINED_FUSION_HIGHLIGHT_IDX, COMBINED_FUSION_HIGHLIGHT_CLUSTERS
 
     with state_lock:
@@ -1412,6 +1466,7 @@ def start_session(config: CombinedModeConfig) -> None:
         combined_hover_boxes = []
         combined_yolo_boxes = []
         combined_a11y_boxes = []
+        combined_a11y_raw_boxes = []
         combined_fused_boxes = []
         COMBINED_FUSION_HIGHLIGHT_IDX = -1
         COMBINED_FUSION_HIGHLIGHT_CLUSTERS = []
@@ -1610,6 +1665,7 @@ def main():
     app_bridge.session_config_signal.connect(prompt_session_start)
     app_bridge.combined_fusion_signal.connect(on_combined_fusion_request)
     app_bridge.save_signal.connect(on_save_request)
+    app_bridge.a11y_filter_signal.connect(on_a11y_filter_request)
 
     print("=" * 23)
     print("  WidgetFusion Annotator")

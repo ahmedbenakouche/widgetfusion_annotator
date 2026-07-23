@@ -6,7 +6,8 @@ import json
 import os
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any, Iterable, Literal, Sequence, Tuple
+from collections import Counter
+from typing import Any, Callable, Iterable, Literal, Sequence, Tuple
 
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import (
@@ -27,9 +28,12 @@ from PyQt6.QtWidgets import (
     QPlainTextEdit,
     QPushButton,
     QRadioButton,
+    QScrollArea,
     QVBoxLayout,
     QWidget,
 )
+
+from accessibility_boxes import CLICKABLE_CONTROL_TYPES, apply_a11y_filters
 
 Box = Tuple[int, int, int, int]
 Source = Literal["hover", "yolo", "a11y"]
@@ -764,6 +768,126 @@ def show_session_config_dialog(a11y_available: bool = True, parent=None) -> Comb
     if dialog.exec() != QDialog.DialogCode.Accepted:
         return None
     return dialog.config()
+
+
+# ─────────────────────────────────────────────
+# A11Y FILTER DIALOG (live preview)
+# ─────────────────────────────────────────────
+
+
+class A11yFilterDialog(QDialog):
+    """Tune control-type and parent-inclusion filters with live overlay preview."""
+
+    def __init__(
+        self,
+        raw_boxes: Sequence[Any],
+        on_preview: Callable[[list[Any]], None] | None = None,
+        parent=None,
+    ):
+        super().__init__(parent)
+        self.setWindowTitle("Accessibilité — filtres")
+        self.setModal(True)
+        self.setWindowFlag(Qt.WindowType.WindowStaysOnTopHint, True)
+        self.resize(420, 560)
+
+        self._raw = list(raw_boxes)
+        self._on_preview = on_preview
+        self._type_checks: dict[str, QCheckBox] = {}
+
+        layout = QVBoxLayout(self)
+        layout.addWidget(QLabel(
+            "Ajustez les filtres : l'overlay bleu se met à jour en direct."
+        ))
+
+        self._count_label = QLabel("")
+        layout.addWidget(self._count_label)
+
+        self._parent_cb = QCheckBox(
+            "Inclusion parent → enfant (garder le parent, retirer l'enfant contenu)"
+        )
+        self._parent_cb.setChecked(True)
+        self._parent_cb.stateChanged.connect(self._emit_preview)
+        layout.addWidget(self._parent_cb)
+
+        type_group = QGroupBox("Types UIA")
+        type_layout = QVBoxLayout(type_group)
+
+        btn_row = QHBoxLayout()
+        btn_default = QPushButton("Cliquables (défaut)")
+        btn_all = QPushButton("Tout")
+        btn_none = QPushButton("Aucun")
+        btn_default.clicked.connect(self._select_clickable)
+        btn_all.clicked.connect(lambda: self._set_all_types(True))
+        btn_none.clicked.connect(lambda: self._set_all_types(False))
+        btn_row.addWidget(btn_default)
+        btn_row.addWidget(btn_all)
+        btn_row.addWidget(btn_none)
+        type_layout.addLayout(btn_row)
+
+        counts = Counter(str(b.get("control_type") or "?") for b in self._raw)
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        host = QWidget()
+        host_layout = QVBoxLayout(host)
+        for control_type, n in sorted(counts.items(), key=lambda t: (-t[1], t[0])):
+            cb = QCheckBox(f"{control_type}  ({n})")
+            cb.setChecked(control_type in CLICKABLE_CONTROL_TYPES)
+            cb.stateChanged.connect(self._emit_preview)
+            self._type_checks[control_type] = cb
+            host_layout.addWidget(cb)
+        host_layout.addStretch(1)
+        scroll.setWidget(host)
+        type_layout.addWidget(scroll)
+        layout.addWidget(type_group, stretch=1)
+
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok)
+        buttons.accepted.connect(self.accept)
+        layout.addWidget(buttons)
+
+        self._emit_preview()
+
+    def _enabled_types(self) -> set[str]:
+        return {name for name, cb in self._type_checks.items() if cb.isChecked()}
+
+    def _set_all_types(self, checked: bool) -> None:
+        for cb in self._type_checks.values():
+            cb.blockSignals(True)
+            cb.setChecked(checked)
+            cb.blockSignals(False)
+        self._emit_preview()
+
+    def _select_clickable(self) -> None:
+        for name, cb in self._type_checks.items():
+            cb.blockSignals(True)
+            cb.setChecked(name in CLICKABLE_CONTROL_TYPES)
+            cb.blockSignals(False)
+        self._emit_preview()
+
+    def filtered_boxes(self) -> list[Any]:
+        return apply_a11y_filters(
+            self._raw,
+            enabled_types=self._enabled_types(),
+            parent_inclusion=self._parent_cb.isChecked(),
+        )
+
+    def _emit_preview(self) -> None:
+        filtered = self.filtered_boxes()
+        self._count_label.setText(
+            f"{len(filtered)} box(es) affichée(s)  ·  {len(self._raw)} brute(s)"
+        )
+        if self._on_preview is not None:
+            self._on_preview(filtered)
+
+
+def show_a11y_filter_dialog(
+    raw_boxes: Sequence[Any],
+    on_preview: Callable[[list[Any]], None] | None = None,
+    parent=None,
+) -> list[Any]:
+    """Show live a11y filter UI; returns the accepted filtered list."""
+    dialog = A11yFilterDialog(raw_boxes=raw_boxes, on_preview=on_preview, parent=parent)
+    dialog.exec()
+    return dialog.filtered_boxes()
 
 
 # ─────────────────────────────────────────────
