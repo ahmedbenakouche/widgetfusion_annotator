@@ -113,6 +113,7 @@ COMBINED_FUSION_HIGHLIGHT_CLUSTERS: list = []
 
 MANUAL_MODE = False
 manual_drag_start = None
+manual_drag_kind = None  # "create" | "erase"
 manual_preview_box = None
 manual_selected_index = None
 manual_edit_mode = None
@@ -121,6 +122,7 @@ manual_edit_origin_box = None
 manual_edit_edges = None
 
 MANUAL_HANDLE_RADIUS = 8
+MANUAL_NUDGE_PX = 1
 _manual_cursor_override_active = False
 
 state_lock = threading.Lock()
@@ -298,7 +300,7 @@ class OverlayWindow(QWidget):
         return (None, set())
 
     def mousePressEvent(self, event):
-        global manual_drag_start, manual_preview_box
+        global manual_drag_start, manual_drag_kind, manual_preview_box
         global manual_selected_index, manual_edit_mode, manual_edit_anchor, manual_edit_origin_box
         global manual_edit_edges
 
@@ -308,29 +310,22 @@ class OverlayWindow(QWidget):
             if COMBINED_MODE and not combined_manual_editing_allowed(COMBINED_PHASE, COMBINED_VIEW):
                 return
 
+        x, y = self._overlay_to_capture(event.position().x(), event.position().y())
+
         if event.button() == Qt.MouseButton.RightButton:
-            x, y = self._overlay_to_capture(event.position().x(), event.position().y())
             with state_lock:
-                boxes = active_boxes_list()
-                sel = manual_selected_index
-                if sel is not None and 0 <= sel < len(boxes):
-                    bx, by, bw, bh = box_coords(boxes[sel])
-                    if self._point_in_box(x, y, (bx, by, bw, bh)):
-                        boxes.pop(sel)
-                        manual_selected_index = None
-                        manual_edit_mode = None
-                        manual_edit_edges = None
-                        manual_edit_anchor = None
-                        manual_edit_origin_box = None
-                        print(f"  [-] Removed selected bbox — Total: {len(boxes)}")
-            manual_drag_start = None
-            manual_preview_box = None
+                manual_edit_mode = None
+                manual_edit_edges = None
+                manual_edit_anchor = None
+                manual_edit_origin_box = None
+            manual_drag_kind = "erase"
+            manual_drag_start = (x, y)
+            manual_preview_box = (x, y, 1, 1)
             self.update()
             return
 
         if event.button() != Qt.MouseButton.LeftButton:
             return
-        x, y = self._overlay_to_capture(event.position().x(), event.position().y())
 
         with state_lock:
             boxes = active_boxes_list()[:]
@@ -354,6 +349,9 @@ class OverlayWindow(QWidget):
                 manual_edit_edges = hit_edges
                 manual_edit_anchor = (x, y)
                 manual_edit_origin_box = box_coords(boxes[hit_index])
+            manual_drag_kind = None
+            manual_drag_start = None
+            manual_preview_box = None
             self.update()
             return
 
@@ -363,6 +361,7 @@ class OverlayWindow(QWidget):
             manual_edit_edges = None
             manual_edit_anchor = None
             manual_edit_origin_box = None
+        manual_drag_kind = "create"
         manual_drag_start = (x, y)
         manual_preview_box = (x, y, 1, 1)
         self.update()
@@ -445,7 +444,6 @@ class OverlayWindow(QWidget):
         if drag_start is None:
             return
         x0, y0 = drag_start
-        x1, y1 = self._overlay_to_capture(event.position().x(), event.position().y())
         x = min(x0, x1)
         y = min(y0, y1)
         w = max(1, abs(x1 - x0))
@@ -454,7 +452,7 @@ class OverlayWindow(QWidget):
         self.update()
 
     def mouseReleaseEvent(self, event):
-        global manual_drag_start, manual_preview_box
+        global manual_drag_start, manual_drag_kind, manual_preview_box
         global manual_selected_index, manual_edit_mode, manual_edit_anchor, manual_edit_origin_box
         global manual_edit_edges
         with state_lock:
@@ -462,6 +460,53 @@ class OverlayWindow(QWidget):
                 return
             if COMBINED_MODE and not combined_manual_editing_allowed(COMBINED_PHASE, COMBINED_VIEW):
                 return
+
+        if event.button() == Qt.MouseButton.RightButton:
+            box = manual_preview_box
+            kind = manual_drag_kind
+            x_click, y_click = self._overlay_to_capture(event.position().x(), event.position().y())
+            manual_drag_start = None
+            manual_drag_kind = None
+            manual_preview_box = None
+
+            if kind != "erase" or box is None:
+                self.update()
+                return
+
+            x, y, w, h = box
+            if w * h < NEW_DIFF_MIN_AREA:
+                with state_lock:
+                    boxes = active_boxes_list()
+                    sel = manual_selected_index
+                    if sel is not None and 0 <= sel < len(boxes):
+                        bx, by, bw, bh = box_coords(boxes[sel])
+                        if self._point_in_box(x_click, y_click, (bx, by, bw, bh)):
+                            boxes.pop(sel)
+                            manual_selected_index = None
+                            manual_edit_mode = None
+                            manual_edit_edges = None
+                            manual_edit_anchor = None
+                            manual_edit_origin_box = None
+                            print(f"  [-] Removed selected bbox — Total: {len(boxes)}")
+                self.update()
+                return
+
+            with state_lock:
+                boxes = active_boxes_list()
+                before = len(boxes)
+                keep = [item for item in boxes if not box_contains(box, item, margin=0)]
+                boxes[:] = keep
+                removed = before - len(boxes)
+                manual_selected_index = None
+                manual_edit_mode = None
+                manual_edit_edges = None
+                manual_edit_anchor = None
+                manual_edit_origin_box = None
+            if removed:
+                print(f"  [-] Erased {removed} enclosed bbox(es) — Total: {before - removed}")
+            self.update()
+            return
+
         if event.button() != Qt.MouseButton.LeftButton:
             return
 
@@ -478,6 +523,7 @@ class OverlayWindow(QWidget):
 
         box = manual_preview_box
         manual_drag_start = None
+        manual_drag_kind = None
         manual_preview_box = None
 
         if box is None:
@@ -505,6 +551,7 @@ class OverlayWindow(QWidget):
             running = RUNNING
             manual = MANUAL_MODE
             preview = manual_preview_box
+            preview_erase = manual_drag_kind == "erase"
             selected = manual_selected_index
             fusion_highlight_idx = COMBINED_FUSION_HIGHLIGHT_IDX
             fusion_clusters = (
@@ -598,11 +645,19 @@ class OverlayWindow(QWidget):
             )
 
         if preview is not None:
-            pen_preview = QPen(QColor(255, 255, 0, 220))
+            color = QColor(255, 60, 60, 230) if preview_erase else QColor(255, 255, 0, 220)
+            pen_preview = QPen(color)
             pen_preview.setWidth(max(1, OVERLAY_LINE_WIDTH))
+            if preview_erase:
+                pen_preview.setStyle(Qt.PenStyle.DashLine)
             painter.setPen(pen_preview)
             x, y, w, h = preview
             painter.drawRect(round(x * sx), round(y * sy), round(w * sx), round(h * sy))
+            if preview_erase:
+                painter.fillRect(
+                    round(x * sx), round(y * sy), round(w * sx), round(h * sy),
+                    QColor(255, 40, 40, 40),
+                )
 
         painter.end()
 
@@ -1561,7 +1616,7 @@ def _sync_manual_cursor() -> None:
 
 def set_manual_mode(enabled: bool):
     """Enable/disable manual mode. Must be called from the Qt thread."""
-    global MANUAL_MODE, manual_drag_start, manual_preview_box
+    global MANUAL_MODE, manual_drag_start, manual_drag_kind, manual_preview_box
     global manual_selected_index, manual_edit_mode, manual_edit_anchor
     global manual_edit_origin_box, manual_edit_edges
     with state_lock:
@@ -1571,6 +1626,7 @@ def set_manual_mode(enabled: bool):
             enabled = False
         MANUAL_MODE = bool(enabled)
         manual_drag_start = None
+        manual_drag_kind = None
         manual_preview_box = None
         manual_selected_index = None
         manual_edit_mode = None
@@ -1614,17 +1670,66 @@ def _is_enter_key(key) -> bool:
     return getattr(key, "name", None) in ("enter", "numpad_enter")
 
 
+def nudge_selected_box(dx: int, dy: int) -> None:
+    """Move the selected manual bbox by (dx, dy) pixels, clamped to capture bounds."""
+    with state_lock:
+        if not MANUAL_MODE:
+            return
+        if COMBINED_MODE and not combined_manual_editing_allowed(COMBINED_PHASE, COMBINED_VIEW):
+            return
+        sel = manual_selected_index
+        if sel is None:
+            return
+        boxes = active_boxes_list()
+        if not (0 <= sel < len(boxes)):
+            return
+        ox, oy, ow, oh = box_coords(boxes[sel])
+        nx = max(0, min(CAPTURE_W - ow, ox + dx))
+        ny = max(0, min(CAPTURE_H - oh, oy + dy))
+        if nx == ox and ny == oy:
+            return
+        current = boxes[sel]
+        if isinstance(current, dict):
+            current["x"] = int(nx)
+            current["y"] = int(ny)
+        else:
+            boxes[sel] = (int(nx), int(ny), int(ow), int(oh))
+
+    if overlay_window is not None:
+        overlay_window.update()
+
+
 def on_key_press(key):
-    """Keyboard handler: Entrée = avancer/fusionner, M = manuel, S = enregistrer, Q = quitter, ←/→ = vue."""
+    """Keyboard handler: Entrée = avancer/fusionner, M = manuel, S = enregistrer, Q = quitter, ←/→ = vue / nudge."""
     try:
         if _is_enter_key(key):
             on_advance_or_fusion()
             return
-        if key == keyboard.Key.left:
-            combined_cycle_view(backward=True)
-            return
-        if key == keyboard.Key.right:
-            combined_cycle_view(backward=False)
+
+        arrow_delta = {
+            keyboard.Key.left: (-MANUAL_NUDGE_PX, 0),
+            keyboard.Key.right: (MANUAL_NUDGE_PX, 0),
+            keyboard.Key.up: (0, -MANUAL_NUDGE_PX),
+            keyboard.Key.down: (0, MANUAL_NUDGE_PX),
+        }
+        if key in arrow_delta:
+            with state_lock:
+                can_nudge = (
+                    MANUAL_MODE
+                    and manual_selected_index is not None
+                    and (
+                        not COMBINED_MODE
+                        or combined_manual_editing_allowed(COMBINED_PHASE, COMBINED_VIEW)
+                    )
+                )
+            if can_nudge:
+                dx, dy = arrow_delta[key]
+                nudge_selected_box(dx, dy)
+                return
+            if key == keyboard.Key.left:
+                combined_cycle_view(backward=True)
+            elif key == keyboard.Key.right:
+                combined_cycle_view(backward=False)
             return
 
         if hasattr(key, "char") and key.char is not None:

@@ -28,15 +28,16 @@ widgetfusion-annotator
 
 1. Au démarrage, choisir les méthodes (hover / YOLO / accessibilité) et le mode hover (manuel ou autoscan).
 2. Enchaîner les phases avec **Entrée** : hover → YOLO → accessibilité → revue.
-3. En revue, **← / →** change la vue :
+3. En phase **accessibilité** (Windows) : scan UIA, puis une fenêtre pour ajuster en direct les **types UIA** et l’**inclusion parent → enfant** (l’overlay bleu se met à jour).
+4. En revue, **← / →** change la vue (sauf si une bbox est sélectionnée en mode manuel — voir ci-dessous) :
    - vert = hover
    - orange = YOLO
    - bleu = accessibilité
    - 3 superposées = lecture seule
    - blanc = fusion
-4. Sur la vue « 3 superposées », **Entrée** ouvre la fusion.
-5. **S** ouvre le dialogue d’enregistrement (choix des sources, chemin, aperçu JSON).
-6. Fermer / Annuler le dialogue de méthodes au démarrage quitte l’application.
+5. Sur la vue « 3 superposées », **Entrée** ouvre la fusion.
+6. **S** ouvre le dialogue d’enregistrement (choix des sources, chemin, aperçu JSON).
+7. Fermer / Annuler le dialogue de méthodes au démarrage quitte l’application.
 
 ## Raccourcis
 
@@ -47,6 +48,16 @@ widgetfusion-annotator
 | **S** | Enregistrer (ou nouvelle session si idle) |
 | **Q** | Quitter |
 | **← / →** | Changer de vue en revue |
+| **← ↑ → ↓** | En manuel + bbox sélectionnée : déplacer la bbox (1 px) |
+
+## Mode manuel (**M**)
+
+Disponible sur une vue mono-source (pas sur « 3 superposées »).
+
+- **Clic gauche** : sélectionner / déplacer / redimensionner, ou dessiner une nouvelle bbox
+- **Clic droit** sur la bbox sélectionnée : la supprimer
+- **Glisser clic droit** : rectangle d’effacement (rouge) — supprime les bbox **entièrement contenues**
+- **Flèches** : déplacer la bbox sélectionnée
 
 ## Fusion
 
@@ -67,7 +78,7 @@ Le dialogue permet de :
 - cocher les sources à exporter (hover / YOLO / a11y / fusion)
 - choisir le dossier
 - prévisualiser le JSON
-- optionnellement écrire **un JSON + image par source**
+- écrire **un JSON + image par source** (**coché par défaut** si plusieurs sources)
 - **Enregistrer** / **Ne pas sauvegarder** (rouvre la config) / **Annuler** (reste en session)
 
 Couleurs des bbox sur l’image annotée = couleurs de l’overlay (sans ID).
@@ -89,14 +100,14 @@ Exemple d’entrée a11y :
 
 | Fichier | Description |
 |---------|-------------|
-| `widgetfusion_annotator.py` | Overlay Qt, capture, phases, export |
-| `fusion_mode.py` | Matching, fusion, dialogues |
+| `widgetfusion_annotator.py` | Overlay Qt, capture, phases, mode manuel, export |
+| `fusion_mode.py` | Matching, fusion, dialogues (session / fusion / a11y filtres / save) |
 | `accessibility_boxes.py` | UI Automation (Windows) ; stubs Linux/macOS |
 
 ## Plateformes
 
-- **Windows** : support complet (dont accessibilité UIA)
-- **Linux / macOS** : expérimental (pas d’a11y pour l’instant)
+- **Windows** : support complet (dont accessibilité UIA + dialogue de filtres live)
+- **Linux / macOS** : expérimental (pas d’a11y pour l’instant ; hover / YOLO / fusion OK)
 
 ## Licence
 
