@@ -11,6 +11,7 @@ from typing import Any, Callable, Iterable, Literal, Sequence, Tuple
 
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import (
+    QApplication,
     QButtonGroup,
     QCheckBox,
     QDialog,
@@ -765,9 +766,14 @@ def run_manual_fusion_wizard(
 
 def show_session_config_dialog(a11y_available: bool = True, parent=None) -> CombinedModeConfig | None:
     dialog = CombinedConfigDialog(a11y_available=a11y_available, parent=parent)
-    if dialog.exec() != QDialog.DialogCode.Accepted:
-        return None
-    return dialog.config()
+    accepted = dialog.exec() == QDialog.DialogCode.Accepted
+    config = dialog.config() if accepted else None
+    # Hide/destroy immediately so a subsequent mss capture does not include the dialog
+    # (common on Linux compositors where the window lingers for a frame or two).
+    dialog.hide()
+    dialog.deleteLater()
+    QApplication.processEvents()
+    return config
 
 
 # ─────────────────────────────────────────────

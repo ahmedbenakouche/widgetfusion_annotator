@@ -65,6 +65,10 @@ OVERLAY_LINE_WIDTH = 0
 OVERLAY_REFRESH_MS = 30
 LOOP_SLEEP = 0.01
 
+# After the session config dialog closes, wait before capturing the baseline.
+# Linux compositors often animate / delay the redraw; Windows is usually faster.
+BASELINE_CAPTURE_SETTLE_MS = 200 if sys.platform.startswith("linux") else 80
+
 # Ignore transient UI (tooltips) that appear away from the cursor.
 IGNORE_NEW_DIFF_AWAY_FROM_CURSOR = True
 NEW_DIFF_MIN_AREA = 25
@@ -1525,6 +1529,8 @@ def start_session(config: CombinedModeConfig) -> None:
         combined_fused_boxes = []
         COMBINED_FUSION_HIGHLIGHT_IDX = -1
         COMBINED_FUSION_HIGHLIGHT_CLUSTERS = []
+        # Flush any pending hide/paint so the closed dialog is not in the baseline.
+        QApplication.processEvents()
         initial_img = capture_screen()
         RUNNING = True
         COMBINED_MODE = True
@@ -1550,7 +1556,10 @@ def prompt_session_start() -> None:
     overlay_window.activateWindow()
     config = show_session_config_dialog(a11y_available=sys.platform == "win32", parent=overlay_window)
     if config is not None:
-        start_session(config)
+        # Defer baseline capture: mss grabs pixels immediately, while the desktop
+        # compositor (esp. Linux) may still show the closing dialog for a short time.
+        QApplication.processEvents()
+        QTimer.singleShot(BASELINE_CAPTURE_SETTLE_MS, lambda c=config: start_session(c))
     else:
         quit_program()
 
