@@ -67,8 +67,7 @@ Matching entre sources si **IoU ≥ seuil** **ou** **inclusion souple ≥ seuil*
 
 - Priorité par défaut : **accessibilité → hover → YOLO** (modifiable dans le dialogue).
 - Les **ancres** de matching suivent cet ordre de priorité.
-- Mode auto : géométrie de la source prioritaire ; métadonnées a11y conservées si présentes dans le groupe.
-- Mode manuel : choix source widget par widget.
+- Fusion **automatique** : géométrie de la source prioritaire ; métadonnées a11y conservées si présentes dans le groupe.
 - Option « bbox isolées » : garder les détections sans match inter-sources.
 
 ## Sauvegarde

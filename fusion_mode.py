@@ -142,7 +142,6 @@ def unique_sources(hits: Iterable[tuple[Source, int, Any]]) -> set[Source]:
 
 @dataclass
 class FusionConfig:
-    mode: Literal["auto", "manual"]
     source_priority: tuple[Source, ...] = SOURCE_PRIORITY
     min_sources: int = 2
     min_iou: float = DEFAULT_FUSION_MIN_IOU
@@ -449,7 +448,7 @@ def _label_with_help(parent: QWidget, label: str, help_title: str, help_text: st
 
 
 class FusionConfigDialog(QDialog):
-    """Choose fusion thresholds, priority, and auto vs manual picking."""
+    """Choose fusion thresholds and source priority (always automatic)."""
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -513,41 +512,6 @@ class FusionConfigDialog(QDialog):
         orphans_row.addStretch()
         layout.addLayout(orphans_row)
 
-        mode_group = QGroupBox("Mode")
-        mode_layout = QVBoxLayout(mode_group)
-        self.auto_rb = QRadioButton("Automatique (priorité globale)")
-        self.manual_rb = QRadioButton("Manuel (choix widget par widget)")
-        self.auto_rb.setChecked(True)
-        mode_btn_group = QButtonGroup(self)
-        mode_btn_group.addButton(self.auto_rb)
-        mode_btn_group.addButton(self.manual_rb)
-        auto_row = QHBoxLayout()
-        auto_row.addWidget(self.auto_rb)
-        auto_row.addWidget(
-            _help_button(
-                self,
-                "Mode automatique",
-                "Pour chaque conflit, la source la plus haute dans "
-                "l’ordre de priorité est retenue partout.",
-            )
-        )
-        auto_row.addStretch()
-        manual_row = QHBoxLayout()
-        manual_row.addWidget(self.manual_rb)
-        manual_row.addWidget(
-            _help_button(
-                self,
-                "Mode manuel",
-                "Une fenêtre s’ouvre pour chaque widget en conflit : "
-                "vous choisissez hover, YOLO ou accessibilité.\n"
-                "L’ordre de priorité sert de présélection par défaut.",
-            )
-        )
-        manual_row.addStretch()
-        mode_layout.addLayout(auto_row)
-        mode_layout.addLayout(manual_row)
-        layout.addWidget(mode_group)
-
         priority_group = QGroupBox("Priorité")
         priority_layout = QVBoxLayout(priority_group)
         priority_header = QHBoxLayout()
@@ -556,9 +520,8 @@ class FusionConfigDialog(QDialog):
             _help_button(
                 self,
                 "Ordre de priorité",
-                "Automatique : la source en haut gagne sur chaque conflit.\n"
-                "Manuel : cet ordre pré-coche la source proposée, "
-                "modifiable à chaque widget.",
+                "Pour chaque conflit, la source la plus haute dans "
+                "l’ordre est retenue (géométrie + matching).",
             )
         )
         priority_header.addStretch()
@@ -617,9 +580,7 @@ class FusionConfigDialog(QDialog):
         return tuple(out)
 
     def _accept(self) -> None:
-        mode: Literal["auto", "manual"] = "auto" if self.auto_rb.isChecked() else "manual"
         self._result = FusionConfig(
-            mode=mode,
             source_priority=self._priority_tuple(),
             min_iou=self.iou_spin.value() / 100.0,
             inclusion_coverage=self.inclusion_spin.value() / 100.0,
@@ -638,130 +599,11 @@ def show_fusion_config_dialog(parent=None) -> FusionConfig | None:
     return dialog.config()
 
 
-def default_source_for_cluster(cluster: Cluster, priority: Sequence[Source]) -> Source:
-    present = unique_sources(cluster)
-    for source in priority:
-        if source in present:
-            return source
-    return next(iter(present))
-
-
 def cluster_box_for_source(cluster: Cluster, source: Source) -> Any | None:
     for src, _, box in cluster:
         if src == source:
             return box
     return None
-
-
-class FusionWidgetPickDialog(QDialog):
-    """Pick which detection source to keep for one conflicting widget."""
-
-    def __init__(
-        self,
-        index: int,
-        total: int,
-        cluster: Cluster,
-        default_source: Source,
-        parent=None,
-    ):
-        super().__init__(parent)
-        self.setWindowTitle(f"Fusion — widget {index} / {total}")
-        self.setModal(True)
-        self.setMinimumWidth(460)
-
-        self._cluster = cluster
-        self._selected_source: Source | None = None
-        self._source_order: list[Source] = []
-
-        layout = QVBoxLayout(self)
-        header = QHBoxLayout()
-        header.addWidget(QLabel(f"<b>Widget {index} / {total}</b> — source à garder ?"))
-        header.addWidget(
-            _help_button(
-                self,
-                "Choix de source",
-                "Plusieurs méthodes ont détecté le même élément.\n"
-                "Choisissez quelle bbox conserver pour la fusion.",
-            )
-        )
-        header.addStretch()
-        layout.addLayout(header)
-
-        sources = [s for s in SOURCE_PRIORITY if s in unique_sources(cluster)]
-        group = QGroupBox("Source à retenir")
-        group_layout = QVBoxLayout(group)
-        self._btn_group = QButtonGroup(self)
-
-        for src in sources:
-            box = cluster_box_for_source(cluster, src)
-            if box is None:
-                continue
-            x, y, w, h = box_coords(box)
-            rb = QRadioButton(f"{SOURCE_LABELS[src]}  —  {w}×{h} px  @ ({x}, {y})")
-            self._source_order.append(src)
-            self._btn_group.addButton(rb, len(self._source_order) - 1)
-            group_layout.addWidget(rb)
-            if src == default_source:
-                rb.setChecked(True)
-
-        layout.addWidget(group)
-
-        buttons = QDialogButtonBox()
-        next_label = "Terminer" if index == total else "Suivant"
-        next_btn = buttons.addButton(next_label, QDialogButtonBox.ButtonRole.AcceptRole)
-        cancel_btn = buttons.addButton("Annuler tout", QDialogButtonBox.ButtonRole.RejectRole)
-        next_btn.clicked.connect(self._accept)
-        cancel_btn.clicked.connect(self.reject)
-        layout.addWidget(buttons)
-
-    def _accept(self) -> None:
-        checked = self._btn_group.checkedButton()
-        if checked is None:
-            return
-        idx = self._btn_group.id(checked)
-        if idx < 0 or idx >= len(self._source_order):
-            return
-        self._selected_source = self._source_order[idx]
-        self.accept()
-
-    def selected_box(self) -> Any:
-        assert self._selected_source is not None
-        return resolve_fused_box(self._cluster, self._selected_source)
-
-    def selected_source(self) -> Source:
-        assert self._selected_source is not None
-        return self._selected_source
-
-
-def run_manual_fusion_wizard(
-    clusters: Sequence[Cluster],
-    source_priority: Sequence[Source],
-    parent=None,
-    on_widget_change=None,
-) -> list[Any] | None:
-    """Ask source per widget via dialog. Returns None if cancelled."""
-    resolved: list[Any] = []
-    total = len(clusters)
-    priority = tuple(source_priority)
-
-    for i, cluster in enumerate(clusters):
-        if on_widget_change is not None:
-            on_widget_change(i, clusters)
-        default = default_source_for_cluster(cluster, priority)
-        dialog = FusionWidgetPickDialog(i + 1, total, cluster, default, parent=parent)
-        if dialog.exec() != QDialog.DialogCode.Accepted:
-            if on_widget_change is not None:
-                on_widget_change(-1, [])
-            return None
-        resolved.append(dialog.selected_box())
-        print(
-            f"[INFO] Widget {i + 1}/{total} : {SOURCE_LABELS[dialog.selected_source()]} retenu.",
-            flush=True,
-        )
-
-    if on_widget_change is not None:
-        on_widget_change(-1, [])
-    return resolved
 
 
 def show_session_config_dialog(a11y_available: bool = True, parent=None) -> CombinedModeConfig | None:

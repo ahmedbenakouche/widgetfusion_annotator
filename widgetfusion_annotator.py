@@ -30,7 +30,6 @@ from fusion_mode import (
     combined_manual_editing_allowed,
     combined_overlay_layers,
     cycle_view,
-    run_manual_fusion_wizard,
     show_session_config_dialog,
     show_fusion_config_dialog,
     show_save_config_dialog,
@@ -1577,28 +1576,12 @@ def on_combined_fusion_request() -> None:
             )
             return
 
-        if config.mode == "manual" and groups:
-            matched = run_manual_fusion_wizard(
-                groups,
-                config.source_priority,
-                parent=overlay_window,
-                on_widget_change=_fusion_wizard_highlight,
-            )
-            if matched is None:
-                return
-        elif config.mode == "manual":
-            matched = []
-        else:
-            matched = fuse_groups_auto(groups, config.source_priority)
-
+        matched = fuse_groups_auto(groups, config.source_priority)
         fused = matched[:]
         if config.include_orphans:
             fused.extend(orphans)
 
-        if config.mode == "manual":
-            _apply_fusion_result(fused, priority=None)
-        else:
-            _apply_fusion_result(fused, priority=config.source_priority)
+        _apply_fusion_result(fused, priority=config.source_priority)
     finally:
         # Modal dialogs often reset the cursor / input flags on Windows.
         if overlay_window is not None:
