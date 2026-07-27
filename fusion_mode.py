@@ -16,7 +16,6 @@ from PyQt6.QtWidgets import (
     QCheckBox,
     QDialog,
     QDialogButtonBox,
-    QDoubleSpinBox,
     QFileDialog,
     QFormLayout,
     QGroupBox,
@@ -30,6 +29,7 @@ from PyQt6.QtWidgets import (
     QPushButton,
     QRadioButton,
     QScrollArea,
+    QSlider,
     QVBoxLayout,
     QWidget,
 )
@@ -447,25 +447,64 @@ def _label_with_help(parent: QWidget, label: str, help_title: str, help_text: st
     return row
 
 
-class FusionConfigDialog(QDialog):
-    """Choose fusion thresholds and source priority (always automatic)."""
+def compute_auto_fused_boxes(
+    hover_boxes: Sequence[Any],
+    yolo_boxes: Sequence[Any],
+    a11y_boxes: Sequence[Any],
+    config: FusionConfig,
+) -> list[Any]:
+    """Build fused boxes from sources using the given fusion config."""
+    groups = build_fusion_groups(
+        hover_boxes,
+        yolo_boxes,
+        a11y_boxes,
+        config.min_iou,
+        config.min_sources,
+        inclusion_coverage=config.inclusion_coverage,
+        source_priority=config.source_priority,
+    )
+    fused = fuse_groups_auto(groups, config.source_priority)
+    if config.include_orphans:
+        fused.extend(collect_orphan_boxes(hover_boxes, yolo_boxes, a11y_boxes, groups))
+    return fused
 
-    def __init__(self, parent=None):
+
+class FusionConfigDialog(QDialog):
+    """Tune fusion thresholds/priority with live overlay preview."""
+
+    def __init__(
+        self,
+        hover_boxes: Sequence[Any],
+        yolo_boxes: Sequence[Any],
+        a11y_boxes: Sequence[Any],
+        on_preview: Callable[[list[Any]], None] | None = None,
+        parent=None,
+    ):
         super().__init__(parent)
         self.setWindowTitle("Fusion")
         self.setModal(True)
+        self.setWindowFlag(Qt.WindowType.WindowStaysOnTopHint, True)
         self.setMinimumWidth(420)
 
+        self._hover = list(hover_boxes)
+        self._yolo = list(yolo_boxes)
+        self._a11y = list(a11y_boxes)
+        self._on_preview = on_preview
+
         layout = QVBoxLayout(self)
+        layout.addWidget(QLabel(
+            "Ajustez le matching et la priorité : l'overlay blanc se met à jour en direct."
+        ))
+        self._count_label = QLabel("")
+        layout.addWidget(self._count_label)
 
         threshold_group = QGroupBox("Matching")
         threshold_form = QFormLayout(threshold_group)
 
-        self.iou_spin = QDoubleSpinBox()
-        self.iou_spin.setRange(1, 100)
-        self.iou_spin.setDecimals(0)
-        self.iou_spin.setSuffix(" %")
-        self.iou_spin.setValue(DEFAULT_FUSION_MIN_IOU * 100)
+        self.iou_slider, self.iou_value_label = self._make_percent_slider(
+            int(DEFAULT_FUSION_MIN_IOU * 100)
+        )
+        self.iou_slider.valueChanged.connect(self._on_iou_changed)
         threshold_form.addRow(
             _label_with_help(
                 self,
@@ -474,14 +513,13 @@ class FusionConfigDialog(QDialog):
                 "Recouvrement entre deux bbox (intersection / union).\n"
                 "Si IoU ≥ ce seuil → même widget.",
             ),
-            self.iou_spin,
+            self._slider_row(self.iou_slider, self.iou_value_label),
         )
 
-        self.inclusion_spin = QDoubleSpinBox()
-        self.inclusion_spin.setRange(1, 100)
-        self.inclusion_spin.setDecimals(0)
-        self.inclusion_spin.setSuffix(" %")
-        self.inclusion_spin.setValue(DEFAULT_INCLUSION_COVERAGE * 100)
+        self.inclusion_slider, self.inclusion_value_label = self._make_percent_slider(
+            int(DEFAULT_INCLUSION_COVERAGE * 100)
+        )
+        self.inclusion_slider.valueChanged.connect(self._on_inclusion_changed)
         threshold_form.addRow(
             _label_with_help(
                 self,
@@ -492,13 +530,14 @@ class FusionConfigDialog(QDialog):
                 "Exemple 90 % : un léger débordement est OK.\n"
                 "100 % = inclusion stricte (fragile au moindre pixel).",
             ),
-            self.inclusion_spin,
+            self._slider_row(self.inclusion_slider, self.inclusion_value_label),
         )
         layout.addWidget(threshold_group)
 
         orphans_row = QHBoxLayout()
         self.orphans_cb = QCheckBox("Garder les bbox isolées")
         self.orphans_cb.setChecked(True)
+        self.orphans_cb.stateChanged.connect(self._emit_preview)
         orphans_row.addWidget(self.orphans_cb)
         orphans_row.addWidget(
             _help_button(
@@ -554,6 +593,38 @@ class FusionConfigDialog(QDialog):
         layout.addWidget(buttons)
 
         self._result: FusionConfig | None = None
+        self._emit_preview()
+
+    @staticmethod
+    def _make_percent_slider(value: int) -> tuple[QSlider, QLabel]:
+        slider = QSlider(Qt.Orientation.Horizontal)
+        slider.setRange(1, 100)
+        slider.setValue(max(1, min(100, value)))
+        slider.setTickPosition(QSlider.TickPosition.TicksBelow)
+        slider.setTickInterval(10)
+        slider.setSingleStep(1)
+        slider.setPageStep(5)
+        label = QLabel(f"{slider.value()} %")
+        label.setMinimumWidth(40)
+        label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        return slider, label
+
+    @staticmethod
+    def _slider_row(slider: QSlider, value_label: QLabel) -> QWidget:
+        row = QWidget()
+        layout = QHBoxLayout(row)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.addWidget(slider, stretch=1)
+        layout.addWidget(value_label)
+        return row
+
+    def _on_iou_changed(self, value: int) -> None:
+        self.iou_value_label.setText(f"{value} %")
+        self._emit_preview()
+
+    def _on_inclusion_changed(self, value: int) -> None:
+        self.inclusion_value_label.setText(f"{value} %")
+        self._emit_preview()
 
     def _move_priority_up(self) -> None:
         row = self.priority_list.currentRow()
@@ -562,6 +633,7 @@ class FusionConfigDialog(QDialog):
         item = self.priority_list.takeItem(row)
         self.priority_list.insertItem(row - 1, item)
         self.priority_list.setCurrentRow(row - 1)
+        self._emit_preview()
 
     def _move_priority_down(self) -> None:
         row = self.priority_list.currentRow()
@@ -570,6 +642,7 @@ class FusionConfigDialog(QDialog):
         item = self.priority_list.takeItem(row)
         self.priority_list.insertItem(row + 1, item)
         self.priority_list.setCurrentRow(row + 1)
+        self._emit_preview()
 
     def _priority_tuple(self) -> tuple[Source, ...]:
         out: list[Source] = []
@@ -579,21 +652,47 @@ class FusionConfigDialog(QDialog):
             out.append(source)
         return tuple(out)
 
-    def _accept(self) -> None:
-        self._result = FusionConfig(
+    def current_config(self) -> FusionConfig:
+        return FusionConfig(
             source_priority=self._priority_tuple(),
-            min_iou=self.iou_spin.value() / 100.0,
-            inclusion_coverage=self.inclusion_spin.value() / 100.0,
+            min_iou=self.iou_slider.value() / 100.0,
+            inclusion_coverage=self.inclusion_slider.value() / 100.0,
             include_orphans=self.orphans_cb.isChecked(),
         )
+
+    def fused_boxes(self) -> list[Any]:
+        return compute_auto_fused_boxes(
+            self._hover, self._yolo, self._a11y, self.current_config()
+        )
+
+    def _emit_preview(self) -> None:
+        fused = self.fused_boxes()
+        self._count_label.setText(f"{len(fused)} box(es) fusionnée(s)")
+        if self._on_preview is not None:
+            self._on_preview(fused)
+
+    def _accept(self) -> None:
+        self._result = self.current_config()
         self.accept()
 
     def config(self) -> FusionConfig | None:
         return self._result
 
 
-def show_fusion_config_dialog(parent=None) -> FusionConfig | None:
-    dialog = FusionConfigDialog(parent=parent)
+def show_fusion_config_dialog(
+    hover_boxes: Sequence[Any],
+    yolo_boxes: Sequence[Any],
+    a11y_boxes: Sequence[Any],
+    on_preview: Callable[[list[Any]], None] | None = None,
+    parent=None,
+) -> FusionConfig | None:
+    dialog = FusionConfigDialog(
+        hover_boxes=hover_boxes,
+        yolo_boxes=yolo_boxes,
+        a11y_boxes=a11y_boxes,
+        on_preview=on_preview,
+        parent=parent,
+    )
     if dialog.exec() != QDialog.DialogCode.Accepted:
         return None
     return dialog.config()

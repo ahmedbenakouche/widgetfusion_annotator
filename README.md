@@ -67,7 +67,8 @@ Matching entre sources si **IoU ≥ seuil** **ou** **inclusion souple ≥ seuil*
 
 - Priorité par défaut : **accessibilité → hover → YOLO** (modifiable dans le dialogue).
 - Les **ancres** de matching suivent cet ordre de priorité.
-- Fusion **automatique** : géométrie de la source prioritaire ; métadonnées a11y conservées si présentes dans le groupe.
+- Fusion **automatique** en direct dans le dialogue : l’overlay blanc se met à jour quand on change IoU, inclusion, isolées ou priorité ; OK valide, Annuler restaure.
+- Géométrie de la source prioritaire ; métadonnées a11y conservées si présentes dans le groupe.
 - Option « bbox isolées » : garder les détections sans match inter-sources.
 
 ## Sauvegarde

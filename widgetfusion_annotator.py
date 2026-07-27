@@ -19,11 +19,9 @@ from accessibility_boxes import (
 from fusion_mode import (
     CombinedModeConfig,
     SOURCE_LABELS,
-    build_fusion_groups,
     build_save_payload,
     cluster_union_rect,
-    collect_orphan_boxes,
-    fuse_groups_auto,
+    compute_auto_fused_boxes,
     combined_effective_layer,
     combined_hover_diff_enabled,
     combined_hover_diff_target_layer,
@@ -1521,6 +1519,17 @@ def _fusion_wizard_highlight(index: int, clusters: list) -> None:
         overlay_window.update()
 
 
+def _preview_fusion(fused: list) -> None:
+    """Live fusion preview while the config dialog is open."""
+    global COMBINED_VIEW
+    with state_lock:
+        combined_fused_boxes.clear()
+        combined_fused_boxes.extend(fused)
+        COMBINED_VIEW = "fused"
+    if overlay_window is not None:
+        overlay_window.update()
+
+
 def _apply_fusion_result(fused: list, priority: tuple | None = None) -> None:
     global COMBINED_VIEW, COMBINED_AUTO_FUSED
 
@@ -1538,6 +1547,8 @@ def _apply_fusion_result(fused: list, priority: tuple | None = None) -> None:
 
 
 def on_combined_fusion_request() -> None:
+    global COMBINED_VIEW
+
     if overlay_window is None:
         return
 
@@ -1551,35 +1562,40 @@ def on_combined_fusion_request() -> None:
         hover = combined_hover_boxes[:]
         yolo = combined_yolo_boxes[:]
         a11y = combined_a11y_boxes[:]
+        prev_fused = combined_fused_boxes[:]
+        prev_view = COMBINED_VIEW
 
     try:
-        config = show_fusion_config_dialog(parent=overlay_window)
+        config = show_fusion_config_dialog(
+            hover_boxes=hover,
+            yolo_boxes=yolo,
+            a11y_boxes=a11y,
+            on_preview=_preview_fusion,
+            parent=overlay_window,
+        )
         if config is None:
+            with state_lock:
+                combined_fused_boxes.clear()
+                combined_fused_boxes.extend(prev_fused)
+                COMBINED_VIEW = prev_view
+            if overlay_window is not None:
+                overlay_window.update()
             return
 
-        groups = build_fusion_groups(
-            hover,
-            yolo,
-            a11y,
-            config.min_iou,
-            config.min_sources,
-            inclusion_coverage=config.inclusion_coverage,
-            source_priority=config.source_priority,
-        )
-        orphans = collect_orphan_boxes(hover, yolo, a11y, groups)
-
-        if not groups and not (config.include_orphans and orphans):
+        fused = compute_auto_fused_boxes(hover, yolo, a11y, config)
+        if not fused:
             print(
                 f"Aucun widget à fusionner "
                 f"(IoU ≥ {config.min_iou:.0%} ou inclusion ≥ {config.inclusion_coverage:.0%}).",
                 flush=True,
             )
+            with state_lock:
+                combined_fused_boxes.clear()
+                combined_fused_boxes.extend(prev_fused)
+                COMBINED_VIEW = prev_view
+            if overlay_window is not None:
+                overlay_window.update()
             return
-
-        matched = fuse_groups_auto(groups, config.source_priority)
-        fused = matched[:]
-        if config.include_orphans:
-            fused.extend(orphans)
 
         _apply_fusion_result(fused, priority=config.source_priority)
     finally:
