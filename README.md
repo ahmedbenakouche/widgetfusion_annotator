@@ -49,6 +49,7 @@ widgetfusion-annotator
 | **Q** | Quitter |
 | **← / →** | Changer de vue en revue |
 | **← ↑ → ↓** | En manuel + bbox sélectionnée : déplacer la bbox (1 px) |
+| **Ctrl+Z / Ctrl+Y** | En manuel : undo / redo |
 
 ## Mode manuel (**M**)
 
@@ -58,6 +59,7 @@ Disponible sur une vue mono-source (pas sur « 3 superposées »).
 - **Clic droit** sur la bbox sélectionnée : la supprimer
 - **Glisser clic droit** : rectangle d’effacement (rouge) — supprime les bbox **entièrement contenues**
 - **Flèches** : déplacer la bbox sélectionnée
+- **Ctrl+Z / Ctrl+Y** : annuler / rétablir (création, suppression, déplacement, redimensionnement)
 
 ## Fusion
 

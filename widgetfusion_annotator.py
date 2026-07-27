@@ -1,6 +1,7 @@
 import numpy as np
 import sys
 import cv2
+import copy
 import json
 import os
 import threading
@@ -127,7 +128,13 @@ manual_edit_edges = None
 
 MANUAL_HANDLE_RADIUS = 8
 MANUAL_NUDGE_PX = 1
+MANUAL_HISTORY_MAX = 50
+manual_undo_stack: list = []
+manual_redo_stack: list = []
+_manual_nudge_batch = False
+_ctrl_pressed = False
 _manual_cursor_override_active = False
+_manual_edit_undo_pushed = False
 
 state_lock = threading.Lock()
 
@@ -192,6 +199,103 @@ def active_overlay_layers() -> list[tuple[list, QColor]]:
     for name in combined_overlay_layers(COMBINED_PHASE, COMBINED_VIEW):
         layers.append((_combined_list_for_layer(name)[:], _COMBINED_LAYER_COLORS[name]))
     return layers
+
+
+def _clone_box_list(boxes) -> list:
+    return copy.deepcopy(list(boxes))
+
+
+def manual_history_clear() -> None:
+    global _manual_nudge_batch, _manual_edit_undo_pushed
+    manual_undo_stack.clear()
+    manual_redo_stack.clear()
+    _manual_nudge_batch = False
+    _manual_edit_undo_pushed = False
+
+
+def manual_history_push() -> None:
+    """Snapshot active boxes before a manual mutation. Caller should hold state_lock."""
+    global _manual_nudge_batch
+    _manual_nudge_batch = False
+    snap = {
+        "boxes": _clone_box_list(active_boxes_list()),
+        "selected": manual_selected_index,
+    }
+    manual_undo_stack.append(snap)
+    if len(manual_undo_stack) > MANUAL_HISTORY_MAX:
+        del manual_undo_stack[0 : len(manual_undo_stack) - MANUAL_HISTORY_MAX]
+    manual_redo_stack.clear()
+
+
+def manual_history_push_nudge() -> None:
+    """Push at most once for a consecutive nudge sequence."""
+    global _manual_nudge_batch
+    if _manual_nudge_batch:
+        return
+    manual_history_push()
+    _manual_nudge_batch = True
+
+
+def manual_history_discard_last_push() -> None:
+    if manual_undo_stack:
+        manual_undo_stack.pop()
+
+
+def _restore_manual_snapshot(snap: dict) -> None:
+    global manual_selected_index, manual_edit_mode, manual_edit_anchor
+    global manual_edit_origin_box, manual_edit_edges
+    boxes = active_boxes_list()
+    boxes[:] = _clone_box_list(snap["boxes"])
+    sel = snap.get("selected")
+    manual_selected_index = sel if sel is not None and 0 <= sel < len(boxes) else None
+    manual_edit_mode = None
+    manual_edit_anchor = None
+    manual_edit_origin_box = None
+    manual_edit_edges = None
+
+
+def manual_undo() -> None:
+    global _manual_nudge_batch, _manual_edit_undo_pushed
+    with state_lock:
+        if not MANUAL_MODE or not manual_undo_stack:
+            return
+        if COMBINED_MODE and not combined_manual_editing_allowed(COMBINED_PHASE, COMBINED_VIEW):
+            return
+        current = {
+            "boxes": _clone_box_list(active_boxes_list()),
+            "selected": manual_selected_index,
+        }
+        snap = manual_undo_stack.pop()
+        manual_redo_stack.append(current)
+        _restore_manual_snapshot(snap)
+        _manual_nudge_batch = False
+        _manual_edit_undo_pushed = False
+        n = len(active_boxes_list())
+    print(f"  [undo] — Total: {n}", flush=True)
+    if overlay_window is not None:
+        overlay_window.update()
+
+
+def manual_redo() -> None:
+    global _manual_nudge_batch, _manual_edit_undo_pushed
+    with state_lock:
+        if not MANUAL_MODE or not manual_redo_stack:
+            return
+        if COMBINED_MODE and not combined_manual_editing_allowed(COMBINED_PHASE, COMBINED_VIEW):
+            return
+        current = {
+            "boxes": _clone_box_list(active_boxes_list()),
+            "selected": manual_selected_index,
+        }
+        snap = manual_redo_stack.pop()
+        manual_undo_stack.append(current)
+        _restore_manual_snapshot(snap)
+        _manual_nudge_batch = False
+        _manual_edit_undo_pushed = False
+        n = len(active_boxes_list())
+    print(f"  [redo] — Total: {n}", flush=True)
+    if overlay_window is not None:
+        overlay_window.update()
 
 
 # ─────────────────────────────────────────────
@@ -306,7 +410,7 @@ class OverlayWindow(QWidget):
     def mousePressEvent(self, event):
         global manual_drag_start, manual_drag_kind, manual_preview_box
         global manual_selected_index, manual_edit_mode, manual_edit_anchor, manual_edit_origin_box
-        global manual_edit_edges
+        global manual_edit_edges, _manual_edit_undo_pushed
 
         with state_lock:
             if not MANUAL_MODE:
@@ -322,6 +426,7 @@ class OverlayWindow(QWidget):
                 manual_edit_edges = None
                 manual_edit_anchor = None
                 manual_edit_origin_box = None
+            _manual_edit_undo_pushed = False
             manual_drag_kind = "erase"
             manual_drag_start = (x, y)
             manual_preview_box = (x, y, 1, 1)
@@ -348,6 +453,8 @@ class OverlayWindow(QWidget):
         if hit_index is not None:
             with state_lock:
                 boxes = active_boxes_list()
+                manual_history_push()
+                _manual_edit_undo_pushed = True
                 manual_selected_index = hit_index
                 manual_edit_mode = hit_mode
                 manual_edit_edges = hit_edges
@@ -365,6 +472,7 @@ class OverlayWindow(QWidget):
             manual_edit_edges = None
             manual_edit_anchor = None
             manual_edit_origin_box = None
+        _manual_edit_undo_pushed = False
         manual_drag_kind = "create"
         manual_drag_start = (x, y)
         manual_preview_box = (x, y, 1, 1)
@@ -458,7 +566,7 @@ class OverlayWindow(QWidget):
     def mouseReleaseEvent(self, event):
         global manual_drag_start, manual_drag_kind, manual_preview_box
         global manual_selected_index, manual_edit_mode, manual_edit_anchor, manual_edit_origin_box
-        global manual_edit_edges
+        global manual_edit_edges, _manual_edit_undo_pushed
         with state_lock:
             if not MANUAL_MODE:
                 return
@@ -485,6 +593,7 @@ class OverlayWindow(QWidget):
                     if sel is not None and 0 <= sel < len(boxes):
                         bx, by, bw, bh = box_coords(boxes[sel])
                         if self._point_in_box(x_click, y_click, (bx, by, bw, bh)):
+                            manual_history_push()
                             boxes.pop(sel)
                             manual_selected_index = None
                             manual_edit_mode = None
@@ -499,13 +608,15 @@ class OverlayWindow(QWidget):
                 boxes = active_boxes_list()
                 before = len(boxes)
                 keep = [item for item in boxes if not box_contains(box, item, margin=0)]
-                boxes[:] = keep
-                removed = before - len(boxes)
-                manual_selected_index = None
-                manual_edit_mode = None
-                manual_edit_edges = None
-                manual_edit_anchor = None
-                manual_edit_origin_box = None
+                removed = before - len(keep)
+                if removed:
+                    manual_history_push()
+                    boxes[:] = keep
+                    manual_selected_index = None
+                    manual_edit_mode = None
+                    manual_edit_edges = None
+                    manual_edit_anchor = None
+                    manual_edit_origin_box = None
             if removed:
                 print(f"  [-] Erased {removed} enclosed bbox(es) — Total: {before - removed}")
             self.update()
@@ -516,6 +627,20 @@ class OverlayWindow(QWidget):
 
         with state_lock:
             if manual_edit_mode is not None:
+                origin = manual_edit_origin_box
+                sel = manual_selected_index
+                boxes = active_boxes_list()
+                changed = True
+                if (
+                    _manual_edit_undo_pushed
+                    and origin is not None
+                    and sel is not None
+                    and 0 <= sel < len(boxes)
+                ):
+                    changed = box_coords(boxes[sel]) != origin
+                if _manual_edit_undo_pushed and not changed:
+                    manual_history_discard_last_push()
+                _manual_edit_undo_pushed = False
                 manual_edit_mode = None
                 manual_edit_anchor = None
                 manual_edit_origin_box = None
@@ -542,6 +667,7 @@ class OverlayWindow(QWidget):
             layer = combined_effective_layer(COMBINED_PHASE, COMBINED_VIEW)
             use_a11y_widget = layer == "a11y"
             if should_append_box(box, boxes):
+                manual_history_push()
                 if use_a11y_widget:
                     x, y, w, h = box
                     boxes.append(make_manual_a11y_widget(x, y, w, h))
@@ -1336,6 +1462,7 @@ def _begin_combined_phase(phase: str) -> None:
 
     COMBINED_PHASE = phase
     YOLO_AUTOSCAN = False
+    manual_history_clear()
 
     if phase == "hover":
         if COMBINED_CONFIG and COMBINED_CONFIG.hover_autoscan:
@@ -1505,6 +1632,7 @@ def combined_cycle_view(backward: bool = False) -> None:
             return
         COMBINED_VIEW = cycle_view(COMBINED_VIEW, backward=backward)
         view = COMBINED_VIEW
+        manual_history_clear()
         if view == "all" and MANUAL_MODE:
             disable_manual = True
 
@@ -1642,6 +1770,7 @@ def set_manual_mode(enabled: bool):
         manual_edit_anchor = None
         manual_edit_origin_box = None
         manual_edit_edges = None
+        manual_history_clear()
 
     if overlay_window is not None:
         overlay_window.set_click_through(not MANUAL_MODE)
@@ -1697,6 +1826,7 @@ def nudge_selected_box(dx: int, dy: int) -> None:
         ny = max(0, min(CAPTURE_H - oh, oy + dy))
         if nx == ox and ny == oy:
             return
+        manual_history_push_nudge()
         current = boxes[sel]
         if isinstance(current, dict):
             current["x"] = int(nx)
@@ -1708,9 +1838,50 @@ def nudge_selected_box(dx: int, dy: int) -> None:
         overlay_window.update()
 
 
+def _is_ctrl_key(key) -> bool:
+    return key in (keyboard.Key.ctrl, keyboard.Key.ctrl_l, keyboard.Key.ctrl_r)
+
+
+def _ctrl_letter(key) -> str | None:
+    """Return 'z' / 'y' for Ctrl+letter, including Windows control codes."""
+    ch = getattr(key, "char", None)
+    if ch == "\x1a":
+        return "z"
+    if ch == "\x19":
+        return "y"
+    if isinstance(ch, str) and len(ch) == 1 and ch.isalpha():
+        return ch.lower()
+    vk = getattr(key, "vk", None)
+    if vk in (90, 0x5A):  # Z
+        return "z"
+    if vk in (89, 0x59):  # Y
+        return "y"
+    return None
+
+
 def on_key_press(key):
-    """Keyboard handler: Entrée = avancer/fusionner, M = manuel, S = enregistrer, Q = quitter, ←/→ = vue / nudge."""
+    """Keyboard handler: Entrée / M / S / Q / flèches / Ctrl+Z / Ctrl+Y."""
+    global _ctrl_pressed
     try:
+        if _is_ctrl_key(key):
+            _ctrl_pressed = True
+            return
+
+        if _ctrl_pressed:
+            letter = _ctrl_letter(key)
+            if letter == "z":
+                with state_lock:
+                    in_manual = MANUAL_MODE
+                if in_manual:
+                    manual_undo()
+                return
+            if letter == "y":
+                with state_lock:
+                    in_manual = MANUAL_MODE
+                if in_manual:
+                    manual_redo()
+                return
+
         if _is_enter_key(key):
             on_advance_or_fusion()
             return
@@ -1756,6 +1927,15 @@ def on_key_press(key):
         print(f"[WARN] Keyboard error: {e}", flush=True)
 
 
+def on_key_release(key):
+    global _ctrl_pressed
+    try:
+        if _is_ctrl_key(key):
+            _ctrl_pressed = False
+    except Exception:
+        pass
+
+
 # ─────────────────────────────────────────────
 # ENTRY POINT
 # ─────────────────────────────────────────────
@@ -1786,7 +1966,7 @@ def main():
     print("=" * 23)
     if not sys.platform.startswith("win"):
         print("Linux / macOS : support expérimental.\n", flush=True)
-    print("Entrée · étape/fusion   M · manuel   S · enregistrer   Q · quitter   ←/→ · vues\n", flush=True)
+    print("Entrée · étape/fusion   M · manuel   S · enregistrer   Q · quitter   ←/→ · vues   Ctrl+Z/Y · undo/redo\n", flush=True)
 
     t = threading.Thread(target=screen_watcher, daemon=True)
     t.start()
@@ -1794,7 +1974,7 @@ def main():
     y = threading.Thread(target=yolo_sweeper, daemon=True)
     y.start()
 
-    kb_listener = keyboard.Listener(on_press=on_key_press)
+    kb_listener = keyboard.Listener(on_press=on_key_press, on_release=on_key_release)
     kb_listener.start()
 
     QTimer.singleShot(0, prompt_session_start)
