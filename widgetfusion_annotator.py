@@ -1586,7 +1586,8 @@ def on_combined_fusion_request() -> None:
         if not fused:
             print(
                 f"Aucun widget à fusionner "
-                f"(IoU ≥ {config.min_iou:.0%} ou inclusion ≥ {config.inclusion_coverage:.0%}).",
+                f"(IoU ≥ {config.min_iou:.0%}"
+                f"{' ou inclusion 100%' if config.strict_inclusion else ''}).",
                 flush=True,
             )
             with state_lock:

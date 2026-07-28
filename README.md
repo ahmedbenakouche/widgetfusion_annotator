@@ -63,7 +63,7 @@ Disponible sur une vue mono-source (pas sur « 3 superposées »).
 
 ## Fusion
 
-Matching entre sources si **IoU ≥ seuil** **ou** **inclusion souple ≥ seuil** (part de la plus petite bbox dans l’intersection — léger débordement toléré).
+Matching entre sources si **IoU ≥ seuil** **ou** (option) **inclusion stricte 100 %** (la plus petite bbox entièrement dans l’autre).
 
 - Priorité par défaut : **accessibilité → hover → YOLO** (modifiable dans le dialogue).
 - Les **ancres** de matching suivent cet ordre de priorité.

@@ -52,7 +52,6 @@ SOURCE_LABELS: dict[Source, str] = {
 Cluster = list[tuple[Source, int, Any]]
 
 DEFAULT_FUSION_MIN_IOU = 0.5
-DEFAULT_INCLUSION_COVERAGE = 0.9
 
 
 @dataclass
@@ -106,9 +105,9 @@ def box_iou(a: Any, b: Any) -> float:
     return inter / union
 
 
-def soft_inclusion(a: Any, b: Any, min_coverage: float = DEFAULT_INCLUSION_COVERAGE) -> bool:
+def soft_inclusion(a: Any, b: Any, min_coverage: float = 1.0) -> bool:
     """
-    True if most of the smaller box lies inside the other (allows slight overflow).
+    True if enough of the smaller box lies inside the other.
     coverage = intersection / area(smaller) ≥ min_coverage.
     """
     inter = intersection_area(a, b)
@@ -124,12 +123,14 @@ def boxes_match(
     a: Any,
     b: Any,
     min_iou: float,
-    inclusion_coverage: float = DEFAULT_INCLUSION_COVERAGE,
+    strict_inclusion: bool = True,
 ) -> bool:
-    """Same widget if IoU ≥ min_iou, or soft inclusion (coverage of smaller box)."""
+    """Same widget if IoU ≥ min_iou, or (optional) smaller box fully inside the other."""
     if box_iou(a, b) >= min_iou:
         return True
-    return soft_inclusion(a, b, min_coverage=inclusion_coverage)
+    if not strict_inclusion:
+        return False
+    return soft_inclusion(a, b, min_coverage=1.0)
 
 
 def _index_boxes(source: Source, boxes: Sequence[Any]) -> list[tuple[Source, int, Any]]:
@@ -145,7 +146,7 @@ class FusionConfig:
     source_priority: tuple[Source, ...] = SOURCE_PRIORITY
     min_sources: int = 2
     min_iou: float = DEFAULT_FUSION_MIN_IOU
-    inclusion_coverage: float = DEFAULT_INCLUSION_COVERAGE
+    strict_inclusion: bool = True
     include_orphans: bool = True
 
 
@@ -177,7 +178,7 @@ def build_fusion_groups(
     a11y_boxes: Sequence[Any],
     min_iou: float,
     min_sources: int = 2,
-    inclusion_coverage: float = DEFAULT_INCLUSION_COVERAGE,
+    strict_inclusion: bool = True,
     source_priority: Sequence[Source] | None = None,
 ) -> list[Cluster]:
     """
@@ -210,7 +211,7 @@ def build_fusion_groups(
                 box_i,
                 box_j,
                 min_iou,
-                inclusion_coverage=inclusion_coverage,
+                strict_inclusion=strict_inclusion,
             ):
                 group.append(entry_j)
 
@@ -460,7 +461,7 @@ def compute_auto_fused_boxes(
         a11y_boxes,
         config.min_iou,
         config.min_sources,
-        inclusion_coverage=config.inclusion_coverage,
+        strict_inclusion=config.strict_inclusion,
         source_priority=config.source_priority,
     )
     fused = fuse_groups_auto(groups, config.source_priority)
@@ -516,22 +517,22 @@ class FusionConfigDialog(QDialog):
             self._slider_row(self.iou_slider, self.iou_value_label),
         )
 
-        self.inclusion_slider, self.inclusion_value_label = self._make_percent_slider(
-            int(DEFAULT_INCLUSION_COVERAGE * 100)
-        )
-        self.inclusion_slider.valueChanged.connect(self._on_inclusion_changed)
-        threshold_form.addRow(
-            _label_with_help(
+        inclusion_row = QHBoxLayout()
+        self.inclusion_cb = QCheckBox("Inclusion stricte (100 %)")
+        self.inclusion_cb.setChecked(True)
+        self.inclusion_cb.stateChanged.connect(self._emit_preview)
+        inclusion_row.addWidget(self.inclusion_cb)
+        inclusion_row.addWidget(
+            _help_button(
                 self,
-                "Inclusion min :",
-                "Inclusion souple",
-                "Part minimale de la plus petite bbox qui doit être dans "
-                "l’intersection avec l’autre.\n"
-                "Exemple 90 % : un léger débordement est OK.\n"
-                "100 % = inclusion stricte (fragile au moindre pixel).",
-            ),
-            self._slider_row(self.inclusion_slider, self.inclusion_value_label),
+                "Inclusion stricte",
+                "Si coché : deux bbox matchent aussi quand la plus petite "
+                "est entièrement contenue dans l’autre (100 %).\n"
+                "Si décoché : seul le critère IoU est utilisé.",
+            )
         )
+        inclusion_row.addStretch()
+        threshold_form.addRow(inclusion_row)
         layout.addWidget(threshold_group)
 
         orphans_row = QHBoxLayout()
@@ -622,10 +623,6 @@ class FusionConfigDialog(QDialog):
         self.iou_value_label.setText(f"{value} %")
         self._emit_preview()
 
-    def _on_inclusion_changed(self, value: int) -> None:
-        self.inclusion_value_label.setText(f"{value} %")
-        self._emit_preview()
-
     def _move_priority_up(self) -> None:
         row = self.priority_list.currentRow()
         if row <= 0:
@@ -656,7 +653,7 @@ class FusionConfigDialog(QDialog):
         return FusionConfig(
             source_priority=self._priority_tuple(),
             min_iou=self.iou_slider.value() / 100.0,
-            inclusion_coverage=self.inclusion_slider.value() / 100.0,
+            strict_inclusion=self.inclusion_cb.isChecked(),
             include_orphans=self.orphans_cb.isChecked(),
         )
 
