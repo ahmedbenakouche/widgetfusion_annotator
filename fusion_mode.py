@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 from dataclasses import dataclass, field
 from datetime import datetime
 from collections import Counter
@@ -34,7 +35,7 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
-from accessibility_boxes import CLICKABLE_CONTROL_TYPES, apply_a11y_filters
+from accessibility_boxes import default_clickable_control_types, apply_a11y_filters
 
 Box = Tuple[int, int, int, int]
 Source = Literal["hover", "yolo", "a11y"]
@@ -394,11 +395,20 @@ class CombinedConfigDialog(QDialog):
         self.yolo_cb.setChecked(True)
         layout.addWidget(self.yolo_cb)
 
-        self.a11y_cb = QCheckBox("Accessibilité (Windows UIA)")
+        if sys.platform.startswith("linux"):
+            a11y_label = "Accessibilité (Linux AT-SPI)"
+            a11y_tip = "Nécessite python3-gi + gir1.2-atspi-2.0 + at-spi2-core (session X11 recommandée)."
+        elif sys.platform == "win32":
+            a11y_label = "Accessibilité (Windows UIA)"
+            a11y_tip = "Nécessite comtypes."
+        else:
+            a11y_label = "Accessibilité"
+            a11y_tip = "Non disponible sur cette plateforme pour le moment."
+        self.a11y_cb = QCheckBox(a11y_label)
         self.a11y_cb.setChecked(a11y_available)
         self.a11y_cb.setEnabled(a11y_available)
         if not a11y_available:
-            self.a11y_cb.setToolTip("Disponible uniquement sur Windows pour le moment.")
+            self.a11y_cb.setToolTip(a11y_tip)
         layout.addWidget(self.a11y_cb)
 
         buttons = QDialogButtonBox(
@@ -753,7 +763,9 @@ class A11yFilterDialog(QDialog):
         self._parent_cb.stateChanged.connect(self._emit_preview)
         layout.addWidget(self._parent_cb)
 
-        type_group = QGroupBox("Types UIA")
+        type_group = QGroupBox(
+            "Rôles AT-SPI" if sys.platform.startswith("linux") else "Types UIA"
+        )
         type_layout = QVBoxLayout(type_group)
 
         btn_row = QHBoxLayout()
@@ -775,7 +787,7 @@ class A11yFilterDialog(QDialog):
         host_layout = QVBoxLayout(host)
         for control_type, n in sorted(counts.items(), key=lambda t: (-t[1], t[0])):
             cb = QCheckBox(f"{control_type}  ({n})")
-            cb.setChecked(control_type in CLICKABLE_CONTROL_TYPES)
+            cb.setChecked(control_type in default_clickable_control_types())
             cb.stateChanged.connect(self._emit_preview)
             self._type_checks[control_type] = cb
             host_layout.addWidget(cb)
@@ -801,9 +813,10 @@ class A11yFilterDialog(QDialog):
         self._emit_preview()
 
     def _select_clickable(self) -> None:
+        clickable = default_clickable_control_types()
         for name, cb in self._type_checks.items():
             cb.blockSignals(True)
-            cb.setChecked(name in CLICKABLE_CONTROL_TYPES)
+            cb.setChecked(name in clickable)
             cb.blockSignals(False)
         self._emit_preview()
 

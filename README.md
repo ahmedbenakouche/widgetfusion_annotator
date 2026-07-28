@@ -104,12 +104,13 @@ Exemple d’entrée a11y :
 |---------|-------------|
 | `widgetfusion_annotator.py` | Overlay Qt, capture, phases, mode manuel, export |
 | `fusion_mode.py` | Matching, fusion, dialogues (session / fusion / a11y filtres / save) |
-| `accessibility_boxes.py` | UI Automation (Windows) ; stubs Linux/macOS |
+| `accessibility_boxes.py` | UIA (Windows) ; AT-SPI / PyGObject (Linux) ; stub macOS |
 
 ## Plateformes
 
-- **Windows** : support complet (dont accessibilité UIA + dialogue de filtres live)
-- **Linux / macOS** : expérimental (pas d’a11y pour l’instant ; hover / YOLO / fusion OK)
+- **Windows** : support complet (accessibilité UIA + dialogue de filtres live)
+- **Linux** : a11y via **AT-SPI2** (PyGObject) — session **X11** recommandée ; deps : `python3-gi gir1.2-atspi-2.0 at-spi2-core`
+- **macOS** : expérimental (pas d’a11y pour l’instant ; hover / YOLO / fusion OK)
 
 ## Licence
 

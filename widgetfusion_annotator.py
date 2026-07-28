@@ -15,6 +15,8 @@ from accessibility_boxes import (
     apply_a11y_filters,
     a11y_box_coords,
     make_manual_a11y_widget,
+    is_a11y_available,
+    warn_linux_a11y_session,
 )
 from fusion_mode import (
     CombinedModeConfig,
@@ -1682,7 +1684,7 @@ def prompt_session_start() -> None:
         return
     overlay_window.raise_()
     overlay_window.activateWindow()
-    config = show_session_config_dialog(a11y_available=sys.platform == "win32", parent=overlay_window)
+    config = show_session_config_dialog(a11y_available=is_a11y_available(), parent=overlay_window)
     if config is not None:
         # Defer baseline capture: mss grabs pixels immediately, while the desktop
         # compositor (esp. Linux) may still show the closing dialog for a short time.
@@ -1964,8 +1966,17 @@ def main():
     print("=" * 23)
     print("  WidgetFusion Annotator")
     print("=" * 23)
-    if not sys.platform.startswith("win"):
-        print("Linux / macOS : support expérimental.\n", flush=True)
+    if sys.platform.startswith("linux"):
+        warn_linux_a11y_session()
+        if not is_a11y_available():
+            print(
+                "Linux : a11y indisponible — installez "
+                "python3-gi gir1.2-atspi-2.0 at-spi2-core "
+                "(session X11 recommandée).\n",
+                flush=True,
+            )
+    elif sys.platform == "darwin":
+        print("macOS : support expérimental (pas d’a11y).\n", flush=True)
     print("Entrée · étape/fusion   M · manuel   S · enregistrer   Q · quitter   ←/→ · vues   Ctrl+Z/Y · undo/redo\n", flush=True)
 
     t = threading.Thread(target=screen_watcher, daemon=True)
