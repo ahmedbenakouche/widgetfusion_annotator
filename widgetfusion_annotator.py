@@ -6,6 +6,7 @@ import json
 import os
 import threading
 import time
+from contextlib import contextmanager
 from datetime import datetime
 from pynput import keyboard, mouse
 from ultralytics import YOLO
@@ -94,6 +95,8 @@ YOLO_MOVE_DELAY_S = 0.5
 # ─────────────────────────────────────────────
 EXIT_PROGRAM = False
 RUNNING = False
+# Pause hover-diff / YOLO autoscan while a Qt dialog covers the screen.
+HOVER_DIFF_PAUSED = False
 initial_img = None
 
 YOLO_AUTOSCAN = False
@@ -171,6 +174,19 @@ def _manual_selection_snap() -> dict:
         "selected": manual_selected_index,
         "selected_indices": list(manual_selected_indices),
     }
+
+
+@contextmanager
+def pause_hover_diff():
+    """Stop hover-diff capture while a modal dialog is visible."""
+    global HOVER_DIFF_PAUSED
+    with state_lock:
+        HOVER_DIFF_PAUSED = True
+    try:
+        yield
+    finally:
+        with state_lock:
+            HOVER_DIFF_PAUSED = False
 
 # Capture geometry in MSS coordinates (updated on first grab).
 CAPTURE_LEFT = 0
@@ -1312,13 +1328,14 @@ def on_save_request() -> None:
         return
 
     img_h, img_w = base_img.shape[:2]
-    result = show_save_config_dialog(
-        available=available,
-        image_width=img_w,
-        image_height=img_h,
-        default_dir=OUTPUT_DIR,
-        parent=overlay_window,
-    )
+    with pause_hover_diff():
+        result = show_save_config_dialog(
+            available=available,
+            image_width=img_w,
+            image_height=img_h,
+            default_dir=OUTPUT_DIR,
+            parent=overlay_window,
+        )
     if result.action == "cancel":
         _sync_manual_cursor()
         return
@@ -1364,12 +1381,17 @@ def screen_watcher():
             combined_phase = COMBINED_PHASE
             combined_view = COMBINED_VIEW
             fusion_picking = COMBINED_FUSION_HIGHLIGHT_IDX >= 0
+            paused = HOVER_DIFF_PAUSED
 
         hover_diff_ok = (
             (not combined or combined_hover_diff_enabled(combined_phase, combined_view))
             and not fusion_picking
+            and not paused
         )
         if manual or not running or base_img is None or not hover_diff_ok:
+            # Drop transient state so the dialog itself is not a post-pause "new" widget.
+            prev_mask_raw = None
+            ignored_transient_mask = None
             time.sleep(0.05)
             continue
 
@@ -1433,9 +1455,10 @@ def yolo_sweeper():
             running = RUNNING
             manual = MANUAL_MODE
             autoscan = YOLO_AUTOSCAN
+            paused = HOVER_DIFF_PAUSED
             base_img = initial_img.copy() if initial_img is not None else None
 
-        if not running or manual or not autoscan or base_img is None:
+        if not running or manual or not autoscan or paused or base_img is None:
             time.sleep(0.05)
             continue
 
@@ -1458,12 +1481,12 @@ def yolo_sweeper():
 
         for box in boxes:
             with state_lock:
-                if EXIT_PROGRAM or not RUNNING or MANUAL_MODE or not YOLO_AUTOSCAN:
+                if EXIT_PROGRAM or not RUNNING or MANUAL_MODE or not YOLO_AUTOSCAN or HOVER_DIFF_PAUSED:
                     break
 
             for (px, py) in yolo_hover_points_for_box(box):
                 with state_lock:
-                    if EXIT_PROGRAM or not RUNNING or MANUAL_MODE or not YOLO_AUTOSCAN:
+                    if EXIT_PROGRAM or not RUNNING or MANUAL_MODE or not YOLO_AUTOSCAN or HOVER_DIFF_PAUSED:
                         break
 
                 sx, sy = capture_to_screen_coords(px, py)
@@ -1529,11 +1552,12 @@ def on_a11y_filter_request() -> None:
         overlay_window.set_click_through(True)
 
     try:
-        filtered = show_a11y_filter_dialog(
-            raw_boxes=raw,
-            on_preview=_preview_a11y_filters,
-            parent=overlay_window,
-        )
+        with pause_hover_diff():
+            filtered = show_a11y_filter_dialog(
+                raw_boxes=raw,
+                on_preview=_preview_a11y_filters,
+                parent=overlay_window,
+            )
         _preview_a11y_filters(filtered)
         print(f"Accessibilité: {len(filtered)} box(es) après filtres.", flush=True)
     finally:
@@ -1669,13 +1693,14 @@ def on_combined_fusion_request() -> None:
         prev_view = COMBINED_VIEW
 
     try:
-        config = show_fusion_config_dialog(
-            hover_boxes=hover,
-            yolo_boxes=yolo,
-            a11y_boxes=a11y,
-            on_preview=_preview_fusion,
-            parent=overlay_window,
-        )
+        with pause_hover_diff():
+            config = show_fusion_config_dialog(
+                hover_boxes=hover,
+                yolo_boxes=yolo,
+                a11y_boxes=a11y,
+                on_preview=_preview_fusion,
+                parent=overlay_window,
+            )
         if config is None:
             with state_lock:
                 combined_fused_boxes.clear()
