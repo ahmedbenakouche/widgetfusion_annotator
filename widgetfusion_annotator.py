@@ -119,10 +119,12 @@ MANUAL_MODE = False
 manual_drag_start = None
 manual_drag_kind = None  # "create" | "erase"
 manual_preview_box = None
-manual_selected_index = None
+manual_selected_index = None  # primary (handles / single edit)
+manual_selected_indices: list[int] = []  # multi-select (marquee / group nudge)
 manual_edit_mode = None
 manual_edit_anchor = None
 manual_edit_origin_box = None
+manual_edit_origin_boxes: dict[int, tuple[int, int, int, int]] | None = None
 manual_edit_edges = None
 
 MANUAL_HANDLE_RADIUS = 8
@@ -136,6 +138,39 @@ _manual_cursor_override_active = False
 _manual_edit_undo_pushed = False
 
 state_lock = threading.Lock()
+
+
+def _manual_clear_selection() -> None:
+    global manual_selected_index, manual_selected_indices
+    global manual_edit_mode, manual_edit_anchor, manual_edit_origin_box
+    global manual_edit_origin_boxes, manual_edit_edges
+    manual_selected_index = None
+    manual_selected_indices = []
+    manual_edit_mode = None
+    manual_edit_anchor = None
+    manual_edit_origin_box = None
+    manual_edit_origin_boxes = None
+    manual_edit_edges = None
+
+
+def _manual_set_selection(indices: list[int], primary: int | None = None) -> None:
+    """Set multi-selection; primary keeps resize handles when exactly one is selected."""
+    global manual_selected_index, manual_selected_indices
+    uniq = sorted({int(i) for i in indices if i >= 0})
+    manual_selected_indices = uniq
+    if not uniq:
+        manual_selected_index = None
+    elif primary is not None and primary in uniq:
+        manual_selected_index = primary
+    else:
+        manual_selected_index = uniq[0]
+
+
+def _manual_selection_snap() -> dict:
+    return {
+        "selected": manual_selected_index,
+        "selected_indices": list(manual_selected_indices),
+    }
 
 # Capture geometry in MSS coordinates (updated on first grab).
 CAPTURE_LEFT = 0
@@ -218,7 +253,7 @@ def manual_history_push() -> None:
     _manual_nudge_batch = False
     snap = {
         "boxes": _clone_box_list(active_boxes_list()),
-        "selected": manual_selected_index,
+        **_manual_selection_snap(),
     }
     manual_undo_stack.append(snap)
     if len(manual_undo_stack) > MANUAL_HISTORY_MAX:
@@ -241,15 +276,19 @@ def manual_history_discard_last_push() -> None:
 
 
 def _restore_manual_snapshot(snap: dict) -> None:
-    global manual_selected_index, manual_edit_mode, manual_edit_anchor
-    global manual_edit_origin_box, manual_edit_edges
+    global manual_edit_mode, manual_edit_anchor
+    global manual_edit_origin_box, manual_edit_origin_boxes, manual_edit_edges
     boxes = active_boxes_list()
     boxes[:] = _clone_box_list(snap["boxes"])
-    sel = snap.get("selected")
-    manual_selected_index = sel if sel is not None and 0 <= sel < len(boxes) else None
+    indices = [i for i in snap.get("selected_indices", []) if 0 <= i < len(boxes)]
+    primary = snap.get("selected")
+    if not indices and primary is not None and 0 <= primary < len(boxes):
+        indices = [primary]
+    _manual_set_selection(indices, primary=primary if primary in indices else None)
     manual_edit_mode = None
     manual_edit_anchor = None
     manual_edit_origin_box = None
+    manual_edit_origin_boxes = None
     manual_edit_edges = None
 
 
@@ -262,7 +301,7 @@ def manual_undo() -> None:
             return
         current = {
             "boxes": _clone_box_list(active_boxes_list()),
-            "selected": manual_selected_index,
+            **_manual_selection_snap(),
         }
         snap = manual_undo_stack.pop()
         manual_redo_stack.append(current)
@@ -284,7 +323,7 @@ def manual_redo() -> None:
             return
         current = {
             "boxes": _clone_box_list(active_boxes_list()),
-            "selected": manual_selected_index,
+            **_manual_selection_snap(),
         }
         snap = manual_redo_stack.pop()
         manual_undo_stack.append(current)
@@ -408,8 +447,9 @@ class OverlayWindow(QWidget):
 
     def mousePressEvent(self, event):
         global manual_drag_start, manual_drag_kind, manual_preview_box
-        global manual_selected_index, manual_edit_mode, manual_edit_anchor, manual_edit_origin_box
-        global manual_edit_edges, _manual_edit_undo_pushed
+        global manual_selected_index, manual_selected_indices
+        global manual_edit_mode, manual_edit_anchor, manual_edit_origin_box
+        global manual_edit_origin_boxes, manual_edit_edges, _manual_edit_undo_pushed
 
         with state_lock:
             if not MANUAL_MODE:
@@ -425,6 +465,7 @@ class OverlayWindow(QWidget):
                 manual_edit_edges = None
                 manual_edit_anchor = None
                 manual_edit_origin_box = None
+                manual_edit_origin_boxes = None
             _manual_edit_undo_pushed = False
             manual_drag_kind = "erase"
             manual_drag_start = (x, y)
@@ -437,6 +478,7 @@ class OverlayWindow(QWidget):
 
         with state_lock:
             boxes = active_boxes_list()[:]
+            selected_set = set(manual_selected_indices)
 
         hit_index = None
         hit_mode = None
@@ -454,11 +496,30 @@ class OverlayWindow(QWidget):
                 boxes = active_boxes_list()
                 manual_history_push()
                 _manual_edit_undo_pushed = True
-                manual_selected_index = hit_index
-                manual_edit_mode = hit_mode
-                manual_edit_edges = hit_edges
-                manual_edit_anchor = (x, y)
-                manual_edit_origin_box = box_coords(boxes[hit_index])
+                # Clicking a member of a multi-selection starts a group move.
+                group = (
+                    hit_mode == "move"
+                    and hit_index in selected_set
+                    and len(selected_set) > 1
+                )
+                if group:
+                    _manual_set_selection(list(selected_set), primary=hit_index)
+                    manual_edit_mode = "move_group"
+                    manual_edit_edges = set()
+                    manual_edit_anchor = (x, y)
+                    manual_edit_origin_box = None
+                    manual_edit_origin_boxes = {
+                        i: box_coords(boxes[i])
+                        for i in manual_selected_indices
+                        if 0 <= i < len(boxes)
+                    }
+                else:
+                    _manual_set_selection([hit_index], primary=hit_index)
+                    manual_edit_mode = hit_mode
+                    manual_edit_edges = hit_edges
+                    manual_edit_anchor = (x, y)
+                    manual_edit_origin_box = box_coords(boxes[hit_index])
+                    manual_edit_origin_boxes = None
             manual_drag_kind = None
             manual_drag_start = None
             manual_preview_box = None
@@ -466,11 +527,7 @@ class OverlayWindow(QWidget):
             return
 
         with state_lock:
-            manual_selected_index = None
-            manual_edit_mode = None
-            manual_edit_edges = None
-            manual_edit_anchor = None
-            manual_edit_origin_box = None
+            _manual_clear_selection()
         _manual_edit_undo_pushed = False
         manual_drag_kind = "create"
         manual_drag_start = (x, y)
@@ -480,7 +537,7 @@ class OverlayWindow(QWidget):
     def mouseMoveEvent(self, event):
         global manual_preview_box
         global manual_selected_index, manual_edit_mode, manual_edit_anchor, manual_edit_origin_box
-        global manual_edit_edges
+        global manual_edit_origin_boxes, manual_edit_edges
         with state_lock:
             if not MANUAL_MODE:
                 return
@@ -491,10 +548,37 @@ class OverlayWindow(QWidget):
             edit_mode = manual_edit_mode
             anchor = manual_edit_anchor
             origin = manual_edit_origin_box
+            origin_boxes = manual_edit_origin_boxes
             drag_start = manual_drag_start
             edges = manual_edit_edges
 
         x1, y1 = self._overlay_to_capture(event.position().x(), event.position().y())
+
+        if edit_mode == "move_group" and anchor is not None and origin_boxes:
+            ax, ay = anchor
+            dx = x1 - ax
+            dy = y1 - ay
+            origins = list(origin_boxes.values())
+            lo_dx = max(-ox for ox, _, _, _ in origins)
+            hi_dx = min(CAPTURE_W - ow - ox for ox, _, ow, _ in origins)
+            lo_dy = max(-oy for _, oy, _, _ in origins)
+            hi_dy = min(CAPTURE_H - oh - oy for _, oy, _, oh in origins)
+            dx = int(max(lo_dx, min(hi_dx, dx)))
+            dy = int(max(lo_dy, min(hi_dy, dy)))
+            with state_lock:
+                boxes = active_boxes_list()
+                for i, (ox, oy, ow, oh) in origin_boxes.items():
+                    if not (0 <= i < len(boxes)):
+                        continue
+                    nx, ny = ox + dx, oy + dy
+                    current = boxes[i]
+                    if isinstance(current, dict):
+                        current["x"] = int(nx)
+                        current["y"] = int(ny)
+                    else:
+                        boxes[i] = (int(nx), int(ny), int(ow), int(oh))
+            self.update()
+            return
 
         if selected is not None and edit_mode is not None and anchor is not None and origin is not None:
             ax, ay = anchor
@@ -565,7 +649,7 @@ class OverlayWindow(QWidget):
     def mouseReleaseEvent(self, event):
         global manual_drag_start, manual_drag_kind, manual_preview_box
         global manual_selected_index, manual_edit_mode, manual_edit_anchor, manual_edit_origin_box
-        global manual_edit_edges, _manual_edit_undo_pushed
+        global manual_edit_origin_boxes, manual_edit_edges, _manual_edit_undo_pushed
         with state_lock:
             if not MANUAL_MODE:
                 return
@@ -594,11 +678,7 @@ class OverlayWindow(QWidget):
                         if self._point_in_box(x_click, y_click, (bx, by, bw, bh)):
                             manual_history_push()
                             boxes.pop(sel)
-                            manual_selected_index = None
-                            manual_edit_mode = None
-                            manual_edit_edges = None
-                            manual_edit_anchor = None
-                            manual_edit_origin_box = None
+                            _manual_clear_selection()
                             print(f"  [-] Removed selected bbox — Total: {len(boxes)}")
                 self.update()
                 return
@@ -611,11 +691,7 @@ class OverlayWindow(QWidget):
                 if removed:
                     manual_history_push()
                     boxes[:] = keep
-                    manual_selected_index = None
-                    manual_edit_mode = None
-                    manual_edit_edges = None
-                    manual_edit_anchor = None
-                    manual_edit_origin_box = None
+                    _manual_clear_selection()
             if removed:
                 print(f"  [-] Erased {removed} enclosed bbox(es) — Total: {before - removed}")
             self.update()
@@ -627,22 +703,32 @@ class OverlayWindow(QWidget):
         with state_lock:
             if manual_edit_mode is not None:
                 origin = manual_edit_origin_box
+                origin_boxes = manual_edit_origin_boxes
+                edit_mode = manual_edit_mode
                 sel = manual_selected_index
                 boxes = active_boxes_list()
                 changed = True
-                if (
-                    _manual_edit_undo_pushed
-                    and origin is not None
-                    and sel is not None
-                    and 0 <= sel < len(boxes)
-                ):
-                    changed = box_coords(boxes[sel]) != origin
+                if _manual_edit_undo_pushed:
+                    if edit_mode == "move_group" and origin_boxes:
+                        changed = any(
+                            0 <= i < len(boxes) and box_coords(boxes[i]) != origin_boxes[i]
+                            for i in origin_boxes
+                        )
+                    elif (
+                        origin is not None
+                        and sel is not None
+                        and 0 <= sel < len(boxes)
+                    ):
+                        changed = box_coords(boxes[sel]) != origin
+                    else:
+                        changed = False
                 if _manual_edit_undo_pushed and not changed:
                     manual_history_discard_last_push()
                 _manual_edit_undo_pushed = False
                 manual_edit_mode = None
                 manual_edit_anchor = None
                 manual_edit_origin_box = None
+                manual_edit_origin_boxes = None
                 manual_edit_edges = None
                 return
 
@@ -663,16 +749,25 @@ class OverlayWindow(QWidget):
 
         with state_lock:
             boxes = active_boxes_list()
-            layer = combined_effective_layer(COMBINED_PHASE, COMBINED_VIEW)
-            use_a11y_widget = layer == "a11y"
-            if should_append_box(box, boxes):
-                manual_history_push()
-                if use_a11y_widget:
-                    x, y, w, h = box
-                    boxes.append(make_manual_a11y_widget(x, y, w, h))
-                else:
-                    boxes.append(box)
-                print(f"  [+] Manual bbox ({x}, {y}) size {w}x{h} — Total: {len(boxes)}")
+            enclosed = [
+                i for i, item in enumerate(boxes)
+                if box_contains(box, item, margin=0)
+            ]
+            if enclosed:
+                # Marquee: select enclosed boxes instead of creating a new one.
+                _manual_set_selection(enclosed)
+                print(f"  [=] Selected {len(enclosed)} bbox(es)")
+            else:
+                layer = combined_effective_layer(COMBINED_PHASE, COMBINED_VIEW)
+                use_a11y_widget = layer == "a11y"
+                if should_append_box(box, boxes):
+                    manual_history_push()
+                    if use_a11y_widget:
+                        boxes.append(make_manual_a11y_widget(x, y, w, h))
+                    else:
+                        boxes.append(box)
+                    print(f"  [+] Manual bbox ({x}, {y}) size {w}x{h} — Total: {len(boxes)}")
+        self.update()
 
     def paintEvent(self, event):
         with state_lock:
@@ -682,6 +777,7 @@ class OverlayWindow(QWidget):
             preview = manual_preview_box
             preview_erase = manual_drag_kind == "erase"
             selected = manual_selected_index
+            selected_set = set(manual_selected_indices)
             fusion_highlight_idx = COMBINED_FUSION_HIGHLIGHT_IDX
             fusion_clusters = (
                 COMBINED_FUSION_HIGHLIGHT_CLUSTERS[:]
@@ -719,7 +815,12 @@ class OverlayWindow(QWidget):
                 yd = round(y * sy)
                 wd = round(w * sx)
                 hd = round(h * sy)
-                is_selected = manual and selected is not None and len(layers) == 1 and idx == selected
+                is_selected = (
+                    manual
+                    and len(layers) == 1
+                    and (idx in selected_set or (selected is not None and idx == selected))
+                )
+                show_handles = is_selected and len(selected_set) <= 1
                 if is_selected:
                     pen_sel = QPen(QColor(0, 200, 255, 240))
                     pen_sel.setWidth(max(1, OVERLAY_LINE_WIDTH + 1))
@@ -728,7 +829,7 @@ class OverlayWindow(QWidget):
                     painter.setPen(pen)
                 painter.drawRect(xd, yd, wd, hd)
 
-                if is_selected:
+                if show_handles:
                     handle_pen = QPen(QColor(0, 200, 255, 240))
                     handle_pen.setWidth(1)
                     painter.setPen(handle_pen)
@@ -1756,8 +1857,6 @@ def _sync_manual_cursor() -> None:
 def set_manual_mode(enabled: bool):
     """Enable/disable manual mode. Must be called from the Qt thread."""
     global MANUAL_MODE, manual_drag_start, manual_drag_kind, manual_preview_box
-    global manual_selected_index, manual_edit_mode, manual_edit_anchor
-    global manual_edit_origin_box, manual_edit_edges
     with state_lock:
         if enabled and COMBINED_FUSION_HIGHLIGHT_IDX >= 0:
             enabled = False
@@ -1767,11 +1866,7 @@ def set_manual_mode(enabled: bool):
         manual_drag_start = None
         manual_drag_kind = None
         manual_preview_box = None
-        manual_selected_index = None
-        manual_edit_mode = None
-        manual_edit_anchor = None
-        manual_edit_origin_box = None
-        manual_edit_edges = None
+        _manual_clear_selection()
         manual_history_clear()
 
     if overlay_window is not None:
@@ -1811,30 +1906,41 @@ def _is_enter_key(key) -> bool:
 
 
 def nudge_selected_box(dx: int, dy: int) -> None:
-    """Move the selected manual bbox by (dx, dy) pixels, clamped to capture bounds."""
+    """Move selected manual bbox(es) by (dx, dy), rigidly clamped to capture bounds."""
     with state_lock:
         if not MANUAL_MODE:
             return
         if COMBINED_MODE and not combined_manual_editing_allowed(COMBINED_PHASE, COMBINED_VIEW):
             return
-        sel = manual_selected_index
-        if sel is None:
+        indices = list(manual_selected_indices)
+        if not indices and manual_selected_index is not None:
+            indices = [manual_selected_index]
+        if not indices:
             return
         boxes = active_boxes_list()
-        if not (0 <= sel < len(boxes)):
+        origins = []
+        for i in indices:
+            if 0 <= i < len(boxes):
+                origins.append((i, box_coords(boxes[i])))
+        if not origins:
             return
-        ox, oy, ow, oh = box_coords(boxes[sel])
-        nx = max(0, min(CAPTURE_W - ow, ox + dx))
-        ny = max(0, min(CAPTURE_H - oh, oy + dy))
-        if nx == ox and ny == oy:
+        lo_dx = max(-ox for _, (ox, _, _, _) in origins)
+        hi_dx = min(CAPTURE_W - ow - ox for _, (ox, _, ow, _) in origins)
+        lo_dy = max(-oy for _, (_, oy, _, _) in origins)
+        hi_dy = min(CAPTURE_H - oh - oy for _, (_, oy, _, oh) in origins)
+        adx = int(max(lo_dx, min(hi_dx, dx)))
+        ady = int(max(lo_dy, min(hi_dy, dy)))
+        if adx == 0 and ady == 0:
             return
         manual_history_push_nudge()
-        current = boxes[sel]
-        if isinstance(current, dict):
-            current["x"] = int(nx)
-            current["y"] = int(ny)
-        else:
-            boxes[sel] = (int(nx), int(ny), int(ow), int(oh))
+        for i, (ox, oy, ow, oh) in origins:
+            nx, ny = ox + adx, oy + ady
+            current = boxes[i]
+            if isinstance(current, dict):
+                current["x"] = int(nx)
+                current["y"] = int(ny)
+            else:
+                boxes[i] = (int(nx), int(ny), int(ow), int(oh))
 
     if overlay_window is not None:
         overlay_window.update()
@@ -1898,7 +2004,7 @@ def on_key_press(key):
             with state_lock:
                 can_nudge = (
                     MANUAL_MODE
-                    and manual_selected_index is not None
+                    and (manual_selected_indices or manual_selected_index is not None)
                     and (
                         not COMBINED_MODE
                         or combined_manual_editing_allowed(COMBINED_PHASE, COMBINED_VIEW)

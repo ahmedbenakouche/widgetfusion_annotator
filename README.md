@@ -48,17 +48,19 @@ widgetfusion-annotator
 | **S** | Enregistrer (ou nouvelle session si idle) |
 | **Q** | Quitter |
 | **← / →** | Changer de vue en revue |
-| **← ↑ → ↓** | En manuel + bbox sélectionnée : déplacer la bbox (1 px) |
+| **← ↑ → ↓** | En manuel + sélection : déplacer la/les bbox (1 px) |
 | **Ctrl+Z / Ctrl+Y** | En manuel : undo / redo |
 
 ## Mode manuel (**M**)
 
 Disponible sur une vue mono-source (pas sur « 3 superposées »).
 
-- **Clic gauche** : sélectionner / déplacer / redimensionner, ou dessiner une nouvelle bbox
+- **Clic gauche** sur une bbox : sélectionner / déplacer / redimensionner
+- **Glisser clic gauche** dans le vide : rectangle jaune — si des bbox sont **entièrement contenues**, elles sont **multi-sélectionnées** ; sinon crée une nouvelle bbox
+- **Clic + glisser** sur un membre d’une multi-sélection : déplacer le groupe
 - **Clic droit** sur la bbox sélectionnée : la supprimer
 - **Glisser clic droit** : rectangle d’effacement (rouge) — supprime les bbox **entièrement contenues**
-- **Flèches** : déplacer la bbox sélectionnée
+- **Flèches** : déplacer la/les bbox sélectionnée(s) (1 px, rigidement)
 - **Ctrl+Z / Ctrl+Y** : annuler / rétablir (création, suppression, déplacement, redimensionnement)
 
 ## Fusion
