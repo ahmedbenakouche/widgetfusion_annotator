@@ -2091,7 +2091,11 @@ def main():
     y = threading.Thread(target=yolo_sweeper, daemon=True)
     y.start()
 
-    kb_listener = keyboard.Listener(on_press=on_key_press, on_release=on_key_release)
+    kb_listener = keyboard.Listener(
+        on_press=on_key_press,
+        on_release=on_key_release,
+        suppress=True,
+    )
     kb_listener.start()
 
     QTimer.singleShot(0, prompt_session_start)
