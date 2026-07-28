@@ -1,93 +1,134 @@
 # WidgetFusion Annotator
 
-Application desktop d’annotation de widgets UI : hover diff, YOLO, accessibilité (Windows), fusion multi-sources.
+Desktop UI widget annotation from multiple sources: **hover diff**, **YOLO**, **accessibility**, then **fusion**.
+
+| Source | Overlay |
+|--------|---------|
+| Hover | green |
+| YOLO | orange |
+| Accessibility | blue |
+| Fusion | white |
+
+---
 
 ## Installation
 
 ```bash
 python -m venv venv
+```
+
+**Windows**
+
+```bash
 venv\Scripts\activate
 pip install .
 ```
 
-Le modèle YOLO attendu par défaut : `yolo26n-1280.pt` (à placer à la racine du projet).
+**Linux**
 
-## Lancement
+```bash
+source venv/bin/activate
+pip install .
+sudo apt install python3-gi gir1.2-atspi-2.0 at-spi2-core   # AT-SPI a11y
+```
+
+---
+
+## Launch
 
 ```bash
 python widgetfusion_annotator.py
 ```
 
-ou, après `pip install .` :
+or :
 
 ```bash
 widgetfusion-annotator
 ```
 
+---
+
 ## Workflow
 
-1. Au démarrage, choisir les méthodes (hover / YOLO / accessibilité) et le mode hover (manuel ou autoscan).
-2. Enchaîner les phases avec **Entrée** : hover → YOLO → accessibilité → revue.
-3. En phase **accessibilité** (Windows) : scan UIA, puis une fenêtre pour ajuster en direct les **types UIA** et l’**inclusion parent → enfant** (l’overlay bleu se met à jour).
-4. En revue, **← / →** change la vue (sauf si une bbox est sélectionnée en mode manuel — voir ci-dessous) :
-   - vert = hover
-   - orange = YOLO
-   - bleu = accessibilité
-   - 3 superposées = lecture seule
-   - blanc = fusion
-5. Sur la vue « 3 superposées », **Entrée** ouvre la fusion.
-6. **S** ouvre le dialogue d’enregistrement (choix des sources, chemin, aperçu JSON).
-7. Fermer / Annuler le dialogue de méthodes au démarrage quitte l’application.
+1. Choose detection methods (hover / YOLO / accessibility) and hover mode (manual or autoscan).
+2. **Enter** advances phases: hover → YOLO → accessibility → review.
+3. **Accessibility** phase: scan, then a live filter dialog (types/roles + parent → child inclusion).
+4. In **review**, **← / →** change the view (unless a manual selection is active):
+   - green = hover · orange = YOLO · blue = a11y · all stacked · white = fusion
+5. On the “all stacked” view, **Enter** opens fusion.
+6. **S** opens the save dialog (sources, path, JSON preview).
+7. Closing / canceling the methods dialog at startup exits the app.
 
-## Raccourcis
+---
 
-| Touche | Action |
+## Shortcuts
+
+Shortcuts are captured globally and **suppressed for other apps** while the program is running.
+
+| Key | Action |
+|-----|--------|
+| **Enter** | Next step / fusion |
+| **M** | Manual mode |
+| **S** | Save |
+| **Q** | Quit |
+| **← / →** | Cycle review views |
+| **← ↑ → ↓** | In manual mode with a selection: move box(es) by 1 px |
+| **Ctrl+Z / Ctrl+Y** | In manual mode: undo / redo |
+
+---
+
+## Manual mode (**M**)
+
+Available on a single-source view (not on “all stacked”).
+
+| Action | Effect |
 |--------|--------|
-| **Entrée** | Étape suivante / fusion (ou nouvelle session si idle) |
-| **M** | Mode manuel (édition des bbox, curseur `+`) |
-| **S** | Enregistrer (ou nouvelle session si idle) |
-| **Q** | Quitter |
-| **← / →** | Changer de vue en revue |
-| **← ↑ → ↓** | En manuel + sélection : déplacer la/les bbox (1 px) |
-| **Ctrl+Z / Ctrl+Y** | En manuel : undo / redo |
+| Left-click a box | Select / move / resize |
+| Left-drag on empty space | Multi-select boxes **fully enclosed** by the yellow rect; otherwise create a new box |
+| Click + drag a member of a multi-selection | Move the whole group |
+| Arrow keys | Move selected box(es) rigidly by 1 px |
+| Right-click the selection | Delete |
+| Right-drag | Erase boxes **fully enclosed** by the red rect |
+| Ctrl+Z / Ctrl+Y | Undo / redo |
 
-## Mode manuel (**M**)
+Resize handles appear only when **exactly one** box is selected.
 
-Disponible sur une vue mono-source (pas sur « 3 superposées »).
+---
 
-- **Clic gauche** sur une bbox : sélectionner / déplacer / redimensionner
-- **Glisser clic gauche** dans le vide : rectangle jaune — si des bbox sont **entièrement contenues**, elles sont **multi-sélectionnées** ; sinon crée une nouvelle bbox
-- **Clic + glisser** sur un membre d’une multi-sélection : déplacer le groupe
-- **Clic droit** sur la bbox sélectionnée : la supprimer
-- **Glisser clic droit** : rectangle d’effacement (rouge) — supprime les bbox **entièrement contenues**
-- **Flèches** : déplacer la/les bbox sélectionnée(s) (1 px, rigidement)
-- **Ctrl+Z / Ctrl+Y** : annuler / rétablir (création, suppression, déplacement, redimensionnement)
+## Accessibility
+
+| Platform | Backend | Live filter |
+|----------|---------|-------------|
+| **Windows** | UI Automation (UIA) | ✓ |
+| **Linux** | AT-SPI2 (PyGObject) — **X11** session recommended | ✓ |
+| **macOS** | Not available | — |
+
+After the scan: checkboxes for found types/roles + **parent → child inclusion**; the blue overlay updates live.
+
+---
 
 ## Fusion
 
-Matching entre sources si **IoU ≥ seuil** **ou** (option) **inclusion stricte 100 %** (la plus petite bbox entièrement dans l’autre).
+Match when **IoU ≥ threshold** **or** (optional) **strict 100% inclusion**.
 
-- Priorité par défaut : **accessibilité → hover → YOLO** (modifiable dans le dialogue).
-- Les **ancres** de matching suivent cet ordre de priorité.
-- Fusion **automatique** en direct dans le dialogue : l’overlay blanc se met à jour quand on change IoU, inclusion, isolées ou priorité ; OK valide, Annuler restaure.
-- Géométrie de la source prioritaire ; métadonnées a11y conservées si présentes dans le groupe.
-- Option « bbox isolées » : garder les détections sans match inter-sources.
+- Default priority: **a11y → hover → YOLO** (editable).
+- **Live** preview in the dialog (OK applies, Cancel restores).
+- Geometry from the priority source; a11y metadata kept when present in the group.
+- “Keep orphan boxes”: keep detections with no cross-source match.
 
-## Sauvegarde
+---
 
-Dossier par défaut : **Bureau/annotations** (créé automatiquement).
+## Save
 
-Le dialogue permet de :
+Default folder: **Desktop/annotations**.
 
-- cocher les sources à exporter (hover / YOLO / a11y / fusion)
-- choisir le dossier
-- prévisualiser le JSON
-- écrire **un JSON + image par source** (**coché par défaut** si plusieurs sources)
-- **Enregistrer** / **Ne pas sauvegarder** (rouvre la config) / **Annuler** (reste en session)
+- Sources to export (hover / YOLO / a11y / fusion)
+- Folder + JSON preview
+- **One JSON + image per source** (checked by default when multiple sources)
+- **Save** / **Don't save** (reopens session config) / **Cancel** (stay in session)
 
-Couleurs des bbox sur l’image annotée = couleurs de l’overlay (sans ID).
 
-Exemple d’entrée a11y :
+Example a11y entry:
 
 ```json
 {
@@ -100,20 +141,18 @@ Exemple d’entrée a11y :
 }
 ```
 
-## Fichiers
+---
 
-| Fichier | Description |
-|---------|-------------|
-| `widgetfusion_annotator.py` | Overlay Qt, capture, phases, mode manuel, export |
-| `fusion_mode.py` | Matching, fusion, dialogues (session / fusion / a11y filtres / save) |
-| `accessibility_boxes.py` | UIA (Windows) ; AT-SPI / PyGObject (Linux) ; stub macOS |
+## Files
 
-## Plateformes
+| File | Role |
+|------|------|
+| `widgetfusion_annotator.py` | Overlay, capture, phases, manual mode, shortcuts, export |
+| `fusion_mode.py` | Matching, fusion, dialogs (session / fusion / a11y / save) |
+| `accessibility_boxes.py` | UIA (Windows), AT-SPI (Linux), macOS stub |
 
-- **Windows** : support complet (accessibilité UIA + dialogue de filtres live)
-- **Linux** : a11y via **AT-SPI2** (PyGObject) — session **X11** recommandée ; deps : `python3-gi gir1.2-atspi-2.0 at-spi2-core`
-- **macOS** : expérimental (pas d’a11y pour l’instant ; hover / YOLO / fusion OK)
+---
 
-## Licence
+## License
 
-MIT — voir `LICENSE`.
+MIT — see `LICENSE`.

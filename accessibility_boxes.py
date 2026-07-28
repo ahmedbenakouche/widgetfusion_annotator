@@ -261,15 +261,15 @@ def warn_linux_a11y_session() -> None:
         return
     if mode == "wayland":
         print(
-            "[WARN] Session Wayland détectée. "
-            "L’a11y de WidgetFusion cible **X11** (même pipeline partout). "
-            "Sous Wayland les résultats ne sont pas fiables. "
-            "Relancez une session « Ubuntu on Xorg » / X11.",
+            "[WARN] Wayland session detected. "
+            "WidgetFusion a11y targets **X11** (same pipeline everywhere). "
+            "Under Wayland results are not reliable. "
+            "Restart in an 'Ubuntu on Xorg' / X11 session.",
             flush=True,
         )
         return
     print(
-        "[WARN] Type de session d’affichage inconnu — a11y attend X11 + AT-SPI.",
+        "[WARN] Unknown display session type — a11y expects X11 + AT-SPI.",
         flush=True,
     )
 
@@ -869,7 +869,7 @@ def _get_boxes_windows(
         return []
 
     print(
-        f"[INFO] Fenêtres visibles (scope): {len(scope_roots)} top-level root(s)",
+        f"[INFO] Visible windows (scope): {len(scope_roots)} top-level root(s)",
         flush=True,
     )
     for _, label in scope_roots:
@@ -890,7 +890,7 @@ def _get_boxes_windows(
             )
         )
 
-    print(f"[INFO] Widgets collectés (brut): {len(boxes)} bbox", flush=True)
+    print(f"[INFO] Widgets collected (raw): {len(boxes)} bbox", flush=True)
     return boxes
 
 
@@ -1644,8 +1644,8 @@ def _collect_x11_orphan_windows(
         if seen.get(box) != prev or prev is None:
             added += 1
             print(
-                f"[WARN] Fenêtre sans AT-SPI (fallback X11): {meta['name']!r} "
-                f"— widgets internes indisponibles (Snap/Flatpak ?).",
+                f"[WARN] Window without AT-SPI (X11 fallback): {meta['name']!r} "
+                f"— internal widgets unavailable (Snap/Flatpak?).",
                 flush=True,
             )
     return added
@@ -1687,17 +1687,17 @@ def _warn_missing_snap_browsers(Atspi) -> None:
     if "firefox" in joined and ("/snap/firefox" in joined or "firefox_firefox" in joined):
         if not any("firefox" in n or "moz" in n for n in names):
             print(
-                "[WARN] Firefox Snap : pas d'arbre AT-SPI hôte "
-                "(confinement). Fallback X11 = 1 bbox fenêtre. "
-                "Solution : Firefox .deb Mozilla, ou Flatpak avec a11y, "
-                "ou tester Terminal / Calculatrice / Fichiers.",
+                "[WARN] Firefox Snap: no host AT-SPI tree "
+                "(confinement). X11 fallback = 1 window bbox. "
+                "Fix: Mozilla Firefox .deb, or Flatpak with a11y, "
+                "or try Terminal / Calculator / Files.",
                 flush=True,
             )
     if "snap-store" in joined or "/snap/snap-store" in joined:
         if not any("snap-store" in n or "software" in n for n in names):
             print(
-                "[WARN] Centre d'applications (Snap) : pas d'arbre AT-SPI hôte. "
-                "Widgets internes impossibles via a11y.",
+                "[WARN] Software Center (Snap): no host AT-SPI tree. "
+                "Internal widgets unavailable via a11y.",
                 flush=True,
             )
 
@@ -1846,7 +1846,7 @@ def _linux_should_skip_window(
                 hit_test = (x, y, w, h)
                 break
         # Keep every window that still has some exposed pixels (Cursor behind a
-        # small Calculatrice must stay in scope).
+        # small Calculator must stay in scope).
         if not _linux_app_window_exposed(
             x11_stack,
             hit_test,
@@ -2192,8 +2192,8 @@ def _get_boxes_linux(
     """Enumerate AT-SPI2 widgets for visible top-level windows (Linux)."""
     Atspi = _import_atspi()
     if Atspi is None:
-        print("[WARN] AT-SPI2 / PyGObject indisponible.")
-        print("[WARN] Installez: sudo apt install python3-gi gir1.2-atspi-2.0 at-spi2-core")
+        print("[WARN] AT-SPI2 / PyGObject unavailable.")
+        print("[WARN] Install: sudo apt install python3-gi gir1.2-atspi-2.0 at-spi2-core")
         return []
 
     try:
@@ -2206,7 +2206,7 @@ def _get_boxes_linux(
     x11_stack = _X11Stack()
     if not x11_stack.ok:
         print(
-            "[WARN] X11 stacking indisponible — filtrage des fenêtres cachées limité.",
+            "[WARN] X11 stacking unavailable — hidden-window filtering is limited.",
             flush=True,
         )
 
@@ -2230,7 +2230,7 @@ def _get_boxes_linux(
         # Shell last: apps/desktop first, then dock/top bar (region-pruned walk).
         scope_roots = sorted(scope_roots, key=lambda r: 1 if r[2] else 0)
         print(
-            f"[INFO] Fenêtres visibles (scope): {len(scope_roots)} top-level root(s)",
+            f"[INFO] Visible windows (scope): {len(scope_roots)} top-level root(s)",
             flush=True,
         )
         for root_element, label, is_shell, is_desktop in scope_roots:
@@ -2275,7 +2275,7 @@ def _get_boxes_linux(
             )
         _enrich_desktop_icon_names(boxes)
     else:
-        print("[WARN] Aucune racine AT-SPI visible.", flush=True)
+        print("[WARN] No visible AT-SPI root.", flush=True)
 
     orphan_n = _collect_x11_orphan_windows(
         x11_stack,
@@ -2289,13 +2289,13 @@ def _get_boxes_linux(
         seen,
     )
     if orphan_n:
-        print(f"[INFO] Fallback X11: {orphan_n} fenêtre(s) sans arbre AT-SPI.", flush=True)
+        print(f"[INFO] X11 fallback: {orphan_n} window(s) without AT-SPI tree.", flush=True)
 
     if not boxes:
         print("[WARN] Could not determine target window for accessibility scan.")
         return []
 
-    print(f"[INFO] Widgets collectés (brut): {len(boxes)} bbox", flush=True)
+    print(f"[INFO] Widgets collected (raw): {len(boxes)} bbox", flush=True)
     return boxes
 
 

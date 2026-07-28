@@ -91,7 +91,7 @@ YOLO_MOVE_DELAY_S = 0.5
 
 
 # ─────────────────────────────────────────────
-# STATE GLOBAL
+# GLOBAL STATE
 # ─────────────────────────────────────────────
 EXIT_PROGRAM = False
 RUNNING = False
@@ -887,7 +887,7 @@ class OverlayWindow(QWidget):
             painter.setPen(QColor(255, 255, 255))
             painter.drawText(
                 32, 44,
-                f"Widget {fusion_highlight_idx + 1} / {total} — choisissez la source dans la fenêtre",
+                f"Widget {fusion_highlight_idx + 1} / {total} — choose the source in the dialog",
             )
 
         if preview is not None:
@@ -1219,7 +1219,7 @@ def remove_overlay_from_current(base_img, current_img):
 
 
 # ─────────────────────────────────────────────
-# SAUVEGARDE
+# SAVE
 # ─────────────────────────────────────────────
 # BGR colors matching overlay QColor (RGB).
 _SAVE_BGR_COLORS = {
@@ -1234,7 +1234,7 @@ def save_results(selected: dict, base_img, output_dir: str = OUTPUT_DIR, separat
     """Save annotated PNG + JSON for the chosen sources (combined or per-source)."""
     flat = [box for boxes in selected.values() for box in boxes]
     if not flat:
-        print("[!] Aucune détection à enregistrer.")
+        print("[!] No detections to save.")
         return None, None
 
     os.makedirs(output_dir, exist_ok=True)
@@ -1324,7 +1324,7 @@ def on_save_request() -> None:
 
     available = {k: v for k, v in available.items() if v}
     if not available:
-        print("[!] Aucune détection à enregistrer.")
+        print("[!] No detections to save.")
         return
 
     img_h, img_w = base_img.shape[:2]
@@ -1363,7 +1363,7 @@ def request_save() -> None:
 
 
 # ─────────────────────────────────────────────
-# THREAD DE SURVEILLANCE
+# WATCHER THREAD
 # ─────────────────────────────────────────────
 def screen_watcher():
     """Background loop: capture → diff → bbox under cursor."""
@@ -1522,8 +1522,8 @@ def _a11y_scan_worker(capture_left, capture_top, capture_width, capture_height):
             combined_a11y_raw_boxes = raw
             combined_a11y_boxes = filtered
             print(
-                f"Accessibilité: {len(filtered)} box(es) "
-                f"(filtre défaut, {len(raw)} brute(s)).",
+                f"Accessibility: {len(filtered)} box(es) "
+                f"(default filter, {len(raw)} raw).",
                 flush=True,
             )
             open_filter_ui = True
@@ -1559,7 +1559,7 @@ def on_a11y_filter_request() -> None:
                 parent=overlay_window,
             )
         _preview_a11y_filters(filtered)
-        print(f"Accessibilité: {len(filtered)} box(es) après filtres.", flush=True)
+        print(f"Accessibility: {len(filtered)} box(es) after filters.", flush=True)
     finally:
         if overlay_window is not None:
             overlay_window.set_click_through(not MANUAL_MODE)
@@ -1573,8 +1573,8 @@ def _print_combined_phase_help(phase: str) -> None:
     labels = {
         "hover": "HOVER",
         "yolo": "YOLO",
-        "a11y": "ACCESSIBILITÉ",
-        "review": "REVUE",
+        "a11y": "ACCESSIBILITY",
+        "review": "REVIEW",
     }
     if phase in labels:
         print(f"→ Phase {labels[phase]}", flush=True)
@@ -1621,7 +1621,7 @@ def advance_combined_phase() -> None:
         if not COMBINED_MODE:
             return
         if COMBINED_PHASE == "a11y" and A11Y_SCAN_PENDING:
-            print("Scan accessibilité en cours…", flush=True)
+            print("Accessibility scan in progress…", flush=True)
             return
         if not COMBINED_PHASES_PENDING:
             if COMBINED_PHASE != "review":
@@ -1713,9 +1713,9 @@ def on_combined_fusion_request() -> None:
         fused = compute_auto_fused_boxes(hover, yolo, a11y, config)
         if not fused:
             print(
-                f"Aucun widget à fusionner "
+                f"No widgets to fuse "
                 f"(IoU ≥ {config.min_iou:.0%}"
-                f"{' ou inclusion 100%' if config.strict_inclusion else ''}).",
+                f"{' or 100% inclusion' if config.strict_inclusion else ''}).",
                 flush=True,
             )
             with state_lock:
@@ -1854,7 +1854,7 @@ def request_toggle_manual_mode() -> None:
 
 
 # ─────────────────────────────────────────────
-# CONTROLES
+# CONTROLS
 # ─────────────────────────────────────────────
 def _sync_manual_cursor() -> None:
     """Keep CrossCursor while MANUAL_MODE is on (survives modal fusion dialogs)."""
@@ -1993,7 +1993,7 @@ def _ctrl_letter(key) -> str | None:
 
 
 def on_key_press(key):
-    """Keyboard handler: Entrée / M / S / Q / flèches / Ctrl+Z / Ctrl+Y."""
+    """Keyboard handler: Enter / M / S / Q / arrows / Ctrl+Z / Ctrl+Y."""
     global _ctrl_pressed
     try:
         if _is_ctrl_key(key):
@@ -2101,14 +2101,14 @@ def main():
         warn_linux_a11y_session()
         if not is_a11y_available():
             print(
-                "Linux : a11y indisponible — installez "
+                "Linux: a11y unavailable — install "
                 "python3-gi gir1.2-atspi-2.0 at-spi2-core "
-                "(session X11 recommandée).\n",
+                "(X11 session recommended).\n",
                 flush=True,
             )
     elif sys.platform == "darwin":
-        print("macOS : support expérimental (pas d’a11y).\n", flush=True)
-    print("Entrée · étape/fusion   M · manuel   S · enregistrer   Q · quitter   ←/→ · vues   Ctrl+Z/Y · undo/redo\n", flush=True)
+        print("macOS: experimental support (no a11y).\n", flush=True)
+    print("Enter · step/fusion   M · manual   S · save   Q · quit   ←/→ · views   Ctrl+Z/Y · undo/redo\n", flush=True)
 
     t = threading.Thread(target=screen_watcher, daemon=True)
     t.start()

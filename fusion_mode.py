@@ -45,9 +45,9 @@ View = Literal["hover", "yolo", "a11y", "all", "fused"]
 SOURCE_PRIORITY: tuple[Source, ...] = ("a11y", "hover", "yolo")
 
 SOURCE_LABELS: dict[Source, str] = {
-    "hover": "Hover (vert)",
+    "hover": "Hover (green)",
     "yolo": "YOLO (orange)",
-    "a11y": "Accessibilité (bleu)",
+    "a11y": "Accessibility (blue)",
 }
 
 Cluster = list[tuple[Source, int, Any]]
@@ -305,7 +305,7 @@ def cluster_union_rect(cluster: Cluster) -> Box:
 def combined_effective_layer(phase: str, view: str) -> Layer | None:
     """
     Single layer for M / undo / hover target.
-    None = vue « all » (affichage seul, pas d'édition).
+    None = "all" view (display only, no editing).
     """
     if phase != "review":
         if phase in ("hover", "yolo", "a11y"):
@@ -319,12 +319,12 @@ def combined_effective_layer(phase: str, view: str) -> Layer | None:
 
 
 def combined_manual_editing_allowed(phase: str, view: str) -> bool:
-    """M works like S/L/G on one list — never on the read-only « all » view."""
+    """M works like S/L/G on one list — never on the read-only "all" view."""
     return combined_effective_layer(phase, view) is not None
 
 
 def combined_hover_diff_enabled(phase: str, view: str) -> bool:
-    """Hover diff in hover phase; in review only on single-layer views (not « all »)."""
+    """Hover diff in hover phase; in review only on single-layer views (not "all")."""
     if phase == "hover":
         return True
     if phase == "review":
@@ -365,14 +365,14 @@ class CombinedConfigDialog(QDialog):
 
     def __init__(self, a11y_available: bool = True, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("WidgetFusion — méthodes de détection")
+        self.setWindowTitle("WidgetFusion — detection methods")
         self.setModal(True)
 
         layout = QVBoxLayout(self)
 
         layout.addWidget(QLabel(
-            "Choisissez les méthodes à exécuter (dans l'ordre : hover → YOLO → accessibilité).\n"
-            "Appuyez sur Entrée entre chaque étape."
+            "Choose which methods to run (in order: hover → YOLO → accessibility).\n"
+            "Press Enter between each step."
         ))
 
         self.hover_cb = QCheckBox("Hover diff")
@@ -381,8 +381,8 @@ class CombinedConfigDialog(QDialog):
 
         hover_group = QGroupBox("Hover")
         hover_layout = QVBoxLayout(hover_group)
-        self.hover_manual_rb = QRadioButton("Survol manuel")
-        self.hover_autoscan_rb = QRadioButton("Autoscan (comme Y)")
+        self.hover_manual_rb = QRadioButton("Manual hover")
+        self.hover_autoscan_rb = QRadioButton("Autoscan (like Y)")
         self.hover_manual_rb.setChecked(True)
         hover_mode_group = QButtonGroup(self)
         hover_mode_group.addButton(self.hover_manual_rb)
@@ -396,14 +396,14 @@ class CombinedConfigDialog(QDialog):
         layout.addWidget(self.yolo_cb)
 
         if sys.platform.startswith("linux"):
-            a11y_label = "Accessibilité (Linux AT-SPI)"
-            a11y_tip = "Nécessite python3-gi + gir1.2-atspi-2.0 + at-spi2-core (session X11 recommandée)."
+            a11y_label = "Accessibility (Linux AT-SPI)"
+            a11y_tip = "Requires python3-gi + gir1.2-atspi-2.0 + at-spi2-core (X11 session recommended)."
         elif sys.platform == "win32":
-            a11y_label = "Accessibilité (Windows UIA)"
-            a11y_tip = "Nécessite comtypes."
+            a11y_label = "Accessibility (Windows UIA)"
+            a11y_tip = "Requires comtypes."
         else:
-            a11y_label = "Accessibilité"
-            a11y_tip = "Non disponible sur cette plateforme pour le moment."
+            a11y_label = "Accessibility"
+            a11y_tip = "Not available on this platform yet."
         self.a11y_cb = QCheckBox(a11y_label)
         self.a11y_cb.setChecked(a11y_available)
         self.a11y_cb.setEnabled(a11y_available)
@@ -436,7 +436,7 @@ class CombinedConfigDialog(QDialog):
 
 
 def _help_button(parent: QWidget, title: str, text: str) -> QPushButton:
-    """Small « ? » button that shows a short explanation."""
+    """Small "?" button that shows a short explanation."""
     btn = QPushButton("?")
     btn.setFixedWidth(24)
     btn.setToolTip(title)
@@ -504,7 +504,7 @@ class FusionConfigDialog(QDialog):
 
         layout = QVBoxLayout(self)
         layout.addWidget(QLabel(
-            "Ajustez le matching et la priorité : l'overlay blanc se met à jour en direct."
+            "Adjust matching and priority: the white overlay updates live."
         ))
         self._count_label = QLabel("")
         layout.addWidget(self._count_label)
@@ -519,26 +519,26 @@ class FusionConfigDialog(QDialog):
         threshold_form.addRow(
             _label_with_help(
                 self,
-                "IoU min :",
-                "IoU minimum",
-                "Recouvrement entre deux bbox (intersection / union).\n"
-                "Si IoU ≥ ce seuil → même widget.",
+                "Min IoU:",
+                "Minimum IoU",
+                "Overlap between two bboxes (intersection / union).\n"
+                "If IoU ≥ this threshold → same widget.",
             ),
             self._slider_row(self.iou_slider, self.iou_value_label),
         )
 
         inclusion_row = QHBoxLayout()
-        self.inclusion_cb = QCheckBox("Inclusion stricte (100 %)")
+        self.inclusion_cb = QCheckBox("Strict inclusion (100%)")
         self.inclusion_cb.setChecked(True)
         self.inclusion_cb.stateChanged.connect(self._emit_preview)
         inclusion_row.addWidget(self.inclusion_cb)
         inclusion_row.addWidget(
             _help_button(
                 self,
-                "Inclusion stricte",
-                "Si coché : deux bbox matchent aussi quand la plus petite "
-                "est entièrement contenue dans l’autre (100 %).\n"
-                "Si décoché : seul le critère IoU est utilisé.",
+                "Strict inclusion",
+                "When checked: two bboxes also match when the smaller one "
+                "is fully contained inside the other (100%).\n"
+                "When unchecked: only the IoU criterion is used.",
             )
         )
         inclusion_row.addStretch()
@@ -546,32 +546,32 @@ class FusionConfigDialog(QDialog):
         layout.addWidget(threshold_group)
 
         orphans_row = QHBoxLayout()
-        self.orphans_cb = QCheckBox("Garder les bbox isolées")
+        self.orphans_cb = QCheckBox("Keep orphan boxes")
         self.orphans_cb.setChecked(True)
         self.orphans_cb.stateChanged.connect(self._emit_preview)
         orphans_row.addWidget(self.orphans_cb)
         orphans_row.addWidget(
             _help_button(
                 self,
-                "Bbox isolées",
-                "Bbox détectées par une seule méthode, sans correspondance "
-                "dans une autre source. Si coché, elles sont ajoutées à la "
-                "vue fusion ; sinon elles sont ignorées.",
+                "Orphan boxes",
+                "Bboxes detected by a single method, with no match "
+                "in another source. When checked, they are added to the "
+                "fusion view; otherwise they are ignored.",
             )
         )
         orphans_row.addStretch()
         layout.addLayout(orphans_row)
 
-        priority_group = QGroupBox("Priorité")
+        priority_group = QGroupBox("Priority")
         priority_layout = QVBoxLayout(priority_group)
         priority_header = QHBoxLayout()
-        priority_header.addWidget(QLabel("Ordre (haut = prioritaire)"))
+        priority_header.addWidget(QLabel("Order (top = highest priority)"))
         priority_header.addWidget(
             _help_button(
                 self,
-                "Ordre de priorité",
-                "Pour chaque conflit, la source la plus haute dans "
-                "l’ordre est retenue (géométrie + matching).",
+                "Priority order",
+                "For each conflict, the highest source in the "
+                "order is kept (geometry + matching).",
             )
         )
         priority_header.addStretch()
@@ -586,8 +586,8 @@ class FusionConfigDialog(QDialog):
         priority_layout.addWidget(self.priority_list)
 
         btn_row = QHBoxLayout()
-        up_btn = QPushButton("Monter")
-        down_btn = QPushButton("Descendre")
+        up_btn = QPushButton("Move up")
+        down_btn = QPushButton("Move down")
         up_btn.clicked.connect(self._move_priority_up)
         down_btn.clicked.connect(self._move_priority_down)
         btn_row.addWidget(up_btn)
@@ -674,7 +674,7 @@ class FusionConfigDialog(QDialog):
 
     def _emit_preview(self) -> None:
         fused = self.fused_boxes()
-        self._count_label.setText(f"{len(fused)} box(es) fusionnée(s)")
+        self._count_label.setText(f"{len(fused)} fused box(es)")
         if self._on_preview is not None:
             self._on_preview(fused)
 
@@ -739,7 +739,7 @@ class A11yFilterDialog(QDialog):
         parent=None,
     ):
         super().__init__(parent)
-        self.setWindowTitle("Accessibilité — filtres")
+        self.setWindowTitle("Accessibility — filters")
         self.setModal(True)
         self.setWindowFlag(Qt.WindowType.WindowStaysOnTopHint, True)
         self.resize(420, 560)
@@ -750,28 +750,28 @@ class A11yFilterDialog(QDialog):
 
         layout = QVBoxLayout(self)
         layout.addWidget(QLabel(
-            "Ajustez les filtres : l'overlay bleu se met à jour en direct."
+            "Adjust filters: the blue overlay updates live."
         ))
 
         self._count_label = QLabel("")
         layout.addWidget(self._count_label)
 
         self._parent_cb = QCheckBox(
-            "Inclusion parent → enfant (garder le parent, retirer l'enfant contenu)"
+            "Parent → child inclusion (keep parent, remove contained child)"
         )
         self._parent_cb.setChecked(True)
         self._parent_cb.stateChanged.connect(self._emit_preview)
         layout.addWidget(self._parent_cb)
 
         type_group = QGroupBox(
-            "Rôles AT-SPI" if sys.platform.startswith("linux") else "Types UIA"
+            "AT-SPI roles" if sys.platform.startswith("linux") else "UIA types"
         )
         type_layout = QVBoxLayout(type_group)
 
         btn_row = QHBoxLayout()
-        btn_default = QPushButton("Cliquables (défaut)")
-        btn_all = QPushButton("Tout")
-        btn_none = QPushButton("Aucun")
+        btn_default = QPushButton("Clickable (default)")
+        btn_all = QPushButton("All")
+        btn_none = QPushButton("None")
         btn_default.clicked.connect(self._select_clickable)
         btn_all.clicked.connect(lambda: self._set_all_types(True))
         btn_none.clicked.connect(lambda: self._set_all_types(False))
@@ -830,7 +830,7 @@ class A11yFilterDialog(QDialog):
     def _emit_preview(self) -> None:
         filtered = self.filtered_boxes()
         self._count_label.setText(
-            f"{len(filtered)} box(es) affichée(s)  ·  {len(self._raw)} brute(s)"
+            f"{len(filtered)} shown box(es)  ·  {len(self._raw)} raw"
         )
         if self._on_preview is not None:
             self._on_preview(filtered)
@@ -851,10 +851,10 @@ def show_a11y_filter_dialog(
 # SAVE DIALOG
 # ─────────────────────────────────────────────
 SAVE_LAYER_LABELS: dict[str, str] = {
-    "hover": "Hover (vert)",
+    "hover": "Hover (green)",
     "yolo": "YOLO (orange)",
-    "a11y": "Accessibilité (bleu)",
-    "fused": "Fusion (blanc)",
+    "a11y": "Accessibility (blue)",
+    "fused": "Fusion (white)",
 }
 
 
@@ -926,7 +926,7 @@ class SaveConfigDialog(QDialog):
         parent=None,
     ):
         super().__init__(parent)
-        self.setWindowTitle("Enregistrer les annotations")
+        self.setWindowTitle("Save annotations")
         self.setModal(True)
         self.setMinimumWidth(560)
         self.setMinimumHeight(540)
@@ -937,10 +937,10 @@ class SaveConfigDialog(QDialog):
         self._result = SaveDialogResult(action="cancel")
 
         layout = QVBoxLayout(self)
-        layout.addWidget(QLabel("Sources disponibles à enregistrer :"))
+        layout.addWidget(QLabel("Sources available to save:"))
 
         self._checks: dict[str, QCheckBox] = {}
-        sources_box = QGroupBox("Contenu")
+        sources_box = QGroupBox("Content")
         sources_layout = QVBoxLayout(sources_box)
         for key in ("hover", "yolo", "a11y", "fused"):
             boxes = self._available.get(key)
@@ -949,11 +949,11 @@ class SaveConfigDialog(QDialog):
             label = SAVE_LAYER_LABELS.get(key, key)
             extra = ""
             if key == "a11y":
-                extra = " — JSON enrichi (control_type, class_name, name)"
+                extra = " — enriched JSON (control_type, class_name, name)"
             elif key in ("hover", "yolo"):
-                extra = " — bbox uniquement"
+                extra = " — bbox only"
             elif key == "fused":
-                extra = " — résultat fusion (métadonnées a11y si conservées)"
+                extra = " — fusion result (a11y metadata if preserved)"
             cb = QCheckBox(f"{label}  ({len(boxes)}){extra}")
             cb.setChecked(True)
             cb.stateChanged.connect(self._refresh_preview)
@@ -962,10 +962,10 @@ class SaveConfigDialog(QDialog):
         layout.addWidget(sources_box)
 
         if not self._checks:
-            layout.addWidget(QLabel("Aucune détection à enregistrer."))
+            layout.addWidget(QLabel("No detections to save."))
 
         self._separate_cb = QCheckBox(
-            "Fichiers séparés par source (un JSON + image annotée par case cochée)"
+            "Separate files per source (one JSON + annotated image per checked box)"
         )
         self._separate_cb.setChecked(True)
         self._separate_cb.setEnabled(len(self._checks) > 1)
@@ -973,26 +973,26 @@ class SaveConfigDialog(QDialog):
         layout.addWidget(self._separate_cb)
 
         path_row = QHBoxLayout()
-        path_row.addWidget(QLabel("Dossier :"))
+        path_row.addWidget(QLabel("Folder:"))
         self._path_edit = QLineEdit(os.path.abspath(default_dir))
         path_row.addWidget(self._path_edit, stretch=1)
-        browse = QPushButton("Parcourir…")
+        browse = QPushButton("Browse…")
         browse.clicked.connect(self._browse)
         path_row.addWidget(browse)
         layout.addLayout(path_row)
 
-        layout.addWidget(QLabel("Aperçu JSON :"))
+        layout.addWidget(QLabel("JSON preview:"))
         self._preview = QPlainTextEdit()
         self._preview.setReadOnly(True)
         self._preview.setLineWrapMode(QPlainTextEdit.LineWrapMode.NoWrap)
         layout.addWidget(self._preview, stretch=1)
 
         buttons = QDialogButtonBox()
-        save_btn = buttons.addButton("Enregistrer", QDialogButtonBox.ButtonRole.AcceptRole)
+        save_btn = buttons.addButton("Save", QDialogButtonBox.ButtonRole.AcceptRole)
         discard_btn = buttons.addButton(
-            "Ne pas sauvegarder", QDialogButtonBox.ButtonRole.DestructiveRole
+            "Don't save", QDialogButtonBox.ButtonRole.DestructiveRole
         )
-        cancel_btn = buttons.addButton("Annuler", QDialogButtonBox.ButtonRole.RejectRole)
+        cancel_btn = buttons.addButton("Cancel", QDialogButtonBox.ButtonRole.RejectRole)
         save_btn.clicked.connect(self._accept_save)
         discard_btn.clicked.connect(self._accept_discard)
         cancel_btn.clicked.connect(self.reject)
@@ -1011,7 +1011,7 @@ class SaveConfigDialog(QDialog):
         separate = self._separate_cb.isChecked() and len(selected) > 1
         if separate:
             parts: list[str] = [
-                "// Mode fichiers séparés — un JSON par source :",
+                "// Separate files mode — one JSON per source:",
                 "",
             ]
             for source, boxes in selected.items():
@@ -1041,7 +1041,7 @@ class SaveConfigDialog(QDialog):
             short = dict(payload)
             short["annotations"] = payload["annotations"][:8]
             short["_preview_note"] = (
-                f"… +{len(payload['annotations']) - 8} annotation(s) non affichée(s)"
+                f"… +{len(payload['annotations']) - 8} annotation(s) not shown"
             )
             payload = short
         return json.dumps(payload, indent=2, ensure_ascii=False)
@@ -1051,7 +1051,7 @@ class SaveConfigDialog(QDialog):
 
     def _browse(self) -> None:
         start = self._path_edit.text().strip() or os.getcwd()
-        chosen = QFileDialog.getExistingDirectory(self, "Dossier de sauvegarde", start)
+        chosen = QFileDialog.getExistingDirectory(self, "Save folder", start)
         if chosen:
             self._path_edit.setText(chosen)
 
