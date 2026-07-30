@@ -31,6 +31,17 @@ source venv/bin/activate
 pip install .
 sudo apt install python3-gi gir1.2-atspi-2.0 at-spi2-core   # AT-SPI a11y
 ```
+**For uv**
+```bash
+uv venv --system-site-packages
+uv sync
+```
+Verify that system site-packages are available with 
+```bash
+cat .venv/pyvenv.cfg
+```
+should return  ```include-system-site-packages = true ```
+
 
 ---
 
