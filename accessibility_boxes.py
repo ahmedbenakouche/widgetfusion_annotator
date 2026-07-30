@@ -210,7 +210,10 @@ UNKNOWN_WINDOW_LABEL = "(unknown window)"
 
 def a11y_window_label(item: A11yWidget | dict[str, Any]) -> str:
     """Stable window key used by the live filter dialog."""
-    label = str(item.get("window") or "").strip()
+    raw = item.get("window")
+    if not isinstance(raw, str):
+        return UNKNOWN_WINDOW_LABEL
+    label = raw.strip()
     return label or UNKNOWN_WINDOW_LABEL
 
 
@@ -1940,7 +1943,8 @@ def _collect_atspi_boxes(
 ) -> None:
     window_origin: tuple[int, int] | None = None
     own_xid: int | None = None
-    win = (window_label or "").strip() or UNKNOWN_WINDOW_LABEL
+    # Keep a dedicated name: do not reuse for Atspi.Rect extents below.
+    win_label = (window_label or "").strip() or UNKNOWN_WINDOW_LABEL
     if x11_stack is not None and x11_stack.ok and not is_shell and not is_desktop:
         try:
             root_name = str(root_element.get_name() or "")
@@ -1951,9 +1955,9 @@ def _collect_atspi_boxes(
         try:
             comp = root_element.get_component_iface()
             if comp is not None:
-                win = comp.get_extents(Atspi.CoordType.WINDOW)
-                if int(win.width) > 0 and int(win.height) > 0:
-                    atspi_wh = (int(win.width), int(win.height))
+                win_ext = comp.get_extents(Atspi.CoordType.WINDOW)
+                if int(win_ext.width) > 0 and int(win_ext.height) > 0:
+                    atspi_wh = (int(win_ext.width), int(win_ext.height))
         except Exception:
             atspi_wh = None
         if atspi_wh is None:
@@ -2100,7 +2104,7 @@ def _collect_atspi_boxes(
                                 metadata = _linux_metadata(
                                     Atspi, element, role_name, role_id
                                 )
-                                metadata["window"] = win
+                                metadata["window"] = win_label
                                 _remember_a11y_box(boxes, seen, box, metadata)
             except Exception:
                 pass
