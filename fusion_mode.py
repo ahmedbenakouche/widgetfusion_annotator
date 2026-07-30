@@ -766,7 +766,7 @@ class A11yFilterDialog(QDialog):
         layout.addWidget(self._count_label)
 
         self._parent_cb = QCheckBox(
-            "Parent → child inclusion (keep parent, remove contained child)"
+            "Inclusion (keep outer box, remove enclosed)"
         )
         self._parent_cb.setChecked(True)
         self._parent_cb.stateChanged.connect(self._emit_preview)
