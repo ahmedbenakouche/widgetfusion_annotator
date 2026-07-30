@@ -3,7 +3,7 @@ name = "widgetfusion-annotator"
 version = "0.1.0"
 description = "Multi-source desktop widget annotation: hover diff, YOLO, accessibility, and fusion"
 readme = "README.md"
-requires-python = ">=3.11"
+requires-python = ">=3.10"
 license = { file = "LICENSE" }
 
 dependencies = [
@@ -15,6 +15,7 @@ dependencies = [
   "ultralytics>=8.4.37",
   "comtypes; sys_platform == 'win32'",
 ]
+
 
 [project.scripts]
 widgetfusion-annotator = "widgetfusion_annotator:main"
