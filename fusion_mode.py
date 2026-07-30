@@ -35,7 +35,11 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
-from accessibility_boxes import default_clickable_control_types, apply_a11y_filters
+from accessibility_boxes import (
+    a11y_window_label,
+    apply_a11y_filters,
+    default_clickable_control_types,
+)
 
 Box = Tuple[int, int, int, int]
 Source = Literal["hover", "yolo", "a11y"]
@@ -258,15 +262,19 @@ def fuse_groups_auto(
 
 
 def cluster_a11y_metadata(cluster: Cluster) -> dict[str, Any] | None:
-    """Return a11y UIA fields from the cluster if an a11y box is present."""
+    """Return a11y metadata fields from the cluster if an a11y box is present."""
     for src, _, box in cluster:
         if src != "a11y" or not isinstance(box, dict):
             continue
-        return {
+        meta = {
             "control_type": box.get("control_type", ""),
             "class_name": box.get("class_name", ""),
             "name": box.get("name", ""),
         }
+        window = str(box.get("window") or "").strip()
+        if window:
+            meta["window"] = window
+        return meta
     return None
 
 
@@ -382,7 +390,7 @@ class CombinedConfigDialog(QDialog):
         hover_group = QGroupBox("Hover")
         hover_layout = QVBoxLayout(hover_group)
         self.hover_manual_rb = QRadioButton("Manual hover")
-        self.hover_autoscan_rb = QRadioButton("Autoscan (like Y)")
+        self.hover_autoscan_rb = QRadioButton("Autoscan")
         self.hover_manual_rb.setChecked(True)
         hover_mode_group = QButtonGroup(self)
         hover_mode_group.addButton(self.hover_manual_rb)
@@ -571,7 +579,7 @@ class FusionConfigDialog(QDialog):
                 self,
                 "Priority order",
                 "For each conflict, the highest source in the "
-                "order is kept (geometry + matching).",
+                "order is kept.",
             )
         )
         priority_header.addStretch()
@@ -730,7 +738,7 @@ def show_session_config_dialog(a11y_available: bool = True, parent=None) -> Comb
 
 
 class A11yFilterDialog(QDialog):
-    """Tune control-type and parent-inclusion filters with live overlay preview."""
+    """Tune window / type / parent-inclusion filters with live overlay preview."""
 
     def __init__(
         self,
@@ -742,11 +750,12 @@ class A11yFilterDialog(QDialog):
         self.setWindowTitle("Accessibility — filters")
         self.setModal(True)
         self.setWindowFlag(Qt.WindowType.WindowStaysOnTopHint, True)
-        self.resize(420, 560)
+        self.resize(480, 640)
 
         self._raw = list(raw_boxes)
         self._on_preview = on_preview
         self._type_checks: dict[str, QCheckBox] = {}
+        self._window_checks: dict[str, QCheckBox] = {}
 
         layout = QVBoxLayout(self)
         layout.addWidget(QLabel(
@@ -762,6 +771,33 @@ class A11yFilterDialog(QDialog):
         self._parent_cb.setChecked(True)
         self._parent_cb.stateChanged.connect(self._emit_preview)
         layout.addWidget(self._parent_cb)
+
+        window_group = QGroupBox("Visible windows")
+        window_layout = QVBoxLayout(window_group)
+        win_btn_row = QHBoxLayout()
+        win_all = QPushButton("All")
+        win_none = QPushButton("None")
+        win_all.clicked.connect(lambda: self._set_all_windows(True))
+        win_none.clicked.connect(lambda: self._set_all_windows(False))
+        win_btn_row.addWidget(win_all)
+        win_btn_row.addWidget(win_none)
+        window_layout.addLayout(win_btn_row)
+
+        win_counts = Counter(a11y_window_label(b) for b in self._raw if isinstance(b, dict))
+        win_scroll = QScrollArea()
+        win_scroll.setWidgetResizable(True)
+        win_host = QWidget()
+        win_host_layout = QVBoxLayout(win_host)
+        for window, n in sorted(win_counts.items(), key=lambda t: (-t[1], t[0].lower())):
+            cb = QCheckBox(f"{window}  ({n})")
+            cb.setChecked(True)
+            cb.stateChanged.connect(self._emit_preview)
+            self._window_checks[window] = cb
+            win_host_layout.addWidget(cb)
+        win_host_layout.addStretch(1)
+        win_scroll.setWidget(win_host)
+        window_layout.addWidget(win_scroll)
+        layout.addWidget(window_group, stretch=1)
 
         type_group = QGroupBox(
             "AT-SPI roles" if sys.platform.startswith("linux") else "UIA types"
@@ -805,8 +841,18 @@ class A11yFilterDialog(QDialog):
     def _enabled_types(self) -> set[str]:
         return {name for name, cb in self._type_checks.items() if cb.isChecked()}
 
+    def _enabled_windows(self) -> set[str]:
+        return {name for name, cb in self._window_checks.items() if cb.isChecked()}
+
     def _set_all_types(self, checked: bool) -> None:
         for cb in self._type_checks.values():
+            cb.blockSignals(True)
+            cb.setChecked(checked)
+            cb.blockSignals(False)
+        self._emit_preview()
+
+    def _set_all_windows(self, checked: bool) -> None:
+        for cb in self._window_checks.values():
             cb.blockSignals(True)
             cb.setChecked(checked)
             cb.blockSignals(False)
@@ -824,6 +870,7 @@ class A11yFilterDialog(QDialog):
         return apply_a11y_filters(
             self._raw,
             enabled_types=self._enabled_types(),
+            enabled_windows=self._enabled_windows(),
             parent_inclusion=self._parent_cb.isChecked(),
         )
 
@@ -885,6 +932,9 @@ def annotation_entry(item: Any, annotation_id: int, source: str) -> dict[str, An
         entry["control_type"] = item.get("control_type", "")
         entry["class_name"] = item.get("class_name", "")
         entry["name"] = item.get("name", "")
+        window = str(item.get("window") or "").strip()
+        if window:
+            entry["window"] = window
     return entry
 
 

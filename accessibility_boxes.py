@@ -46,7 +46,7 @@ _LINUX_DESKTOP_APP_NAMES = frozenset({
 })
 
 
-class A11yWidget(TypedDict):
+class A11yWidget(TypedDict, total=False):
     x: int
     y: int
     w: int
@@ -55,6 +55,7 @@ class A11yWidget(TypedDict):
     control_type_id: int
     class_name: str
     name: str
+    window: str  # top-level window label (scope root / X11 fallback)
 
 
 # Windows UIA control types (default “clickable” filter on win32).
@@ -200,7 +201,17 @@ def make_manual_a11y_widget(x: int, y: int, w: int, h: int) -> A11yWidget:
         "control_type_id": 0,
         "class_name": "",
         "name": "",
+        "window": "(manual)",
     }
+
+
+UNKNOWN_WINDOW_LABEL = "(unknown window)"
+
+
+def a11y_window_label(item: A11yWidget | dict[str, Any]) -> str:
+    """Stable window key used by the live filter dialog."""
+    label = str(item.get("window") or "").strip()
+    return label or UNKNOWN_WINDOW_LABEL
 
 
 def _bootstrap_system_gi() -> None:
@@ -488,11 +499,14 @@ def _merge_near_duplicate_a11y_boxes(boxes: List[A11yWidget]) -> List[A11yWidget
 def apply_a11y_filters(
     boxes: Sequence[A11yWidget] | List[A11yWidget],
     enabled_types: set[str] | frozenset[str] | None = None,
+    enabled_windows: set[str] | frozenset[str] | None = None,
     parent_inclusion: bool = True,
 ) -> List[A11yWidget]:
-    """Filter raw a11y widgets by control type and optional parent-child inclusion."""
+    """Filter raw a11y widgets by window, control type, and optional parent inclusion."""
     types = set(default_clickable_control_types()) if enabled_types is None else set(enabled_types)
     filtered = [b for b in boxes if str(b.get("control_type") or "") in types]
+    if enabled_windows is not None:
+        filtered = [b for b in filtered if a11y_window_label(b) in enabled_windows]
     if parent_inclusion:
         filtered = _suppress_contained_children(filtered)
     filtered = _merge_near_duplicate_a11y_boxes(filtered)
@@ -773,10 +787,12 @@ def _collect_uia_boxes(
     capture_width: int,
     capture_height: int,
     seen: set[Box] | None = None,
+    window_label: str = "",
 ) -> List[A11yWidget]:
     boxes: List[A11yWidget] = []
     if seen is None:
         seen = set()
+    win = (window_label or "").strip() or UNKNOWN_WINDOW_LABEL
 
     def walk(element, depth: int = 0) -> None:
         if element is None or depth > 64:
@@ -810,6 +826,7 @@ def _collect_uia_boxes(
                             "w": w,
                             "h": h,
                             **metadata,
+                            "window": win,
                         })
             except Exception:
                 pass
@@ -877,7 +894,7 @@ def _get_boxes_windows(
 
     seen: set[Box] = set()
     boxes: List[A11yWidget] = []
-    for root_element, _label in scope_roots:
+    for root_element, label in scope_roots:
         boxes.extend(
             _collect_uia_boxes(
                 automation,
@@ -887,6 +904,7 @@ def _get_boxes_windows(
                 capture_width,
                 capture_height,
                 seen=seen,
+                window_label=label,
             )
         )
 
@@ -1633,18 +1651,20 @@ def _collect_x11_orphan_windows(
         )
         if box is None:
             continue
+        win_label = title or f"X11:0x{xid:x}"
         meta = {
             "control_type": "x11 window",
             "control_type_id": 0,
             "class_name": "x11",
-            "name": title or f"X11:0x{xid:x}",
+            "name": win_label,
+            "window": win_label,
         }
         prev = seen.get(box)
         _remember_a11y_box(boxes, seen, box, meta)
         if seen.get(box) != prev or prev is None:
             added += 1
             print(
-                f"[WARN] Window without AT-SPI (X11 fallback): {meta['name']!r} "
+                f"[WARN] Window without AT-SPI (X11 fallback): {win_label!r} "
                 f"— internal widgets unavailable (Snap/Flatpak?).",
                 flush=True,
             )
@@ -1916,9 +1936,11 @@ def _collect_atspi_boxes(
     is_shell: bool = False,
     is_desktop: bool = False,
     x11_stack: _X11Stack | None = None,
+    window_label: str = "",
 ) -> None:
     window_origin: tuple[int, int] | None = None
     own_xid: int | None = None
+    win = (window_label or "").strip() or UNKNOWN_WINDOW_LABEL
     if x11_stack is not None and x11_stack.ok and not is_shell and not is_desktop:
         try:
             root_name = str(root_element.get_name() or "")
@@ -2078,6 +2100,7 @@ def _collect_atspi_boxes(
                                 metadata = _linux_metadata(
                                     Atspi, element, role_name, role_id
                                 )
+                                metadata["window"] = win
                                 _remember_a11y_box(boxes, seen, box, metadata)
             except Exception:
                 pass
@@ -2272,6 +2295,7 @@ def _get_boxes_linux(
                 is_shell=is_shell,
                 is_desktop=is_desktop,
                 x11_stack=x11_stack,
+                window_label=label,
             )
         _enrich_desktop_icon_names(boxes)
     else:

@@ -114,7 +114,7 @@ Resize handles appear only when **exactly one** box is selected.
 | **Linux** | AT-SPI2 (PyGObject) — **X11** session recommended | ✓ |
 | **macOS** | Not available | — |
 
-After the scan: checkboxes for found types/roles + **parent → child inclusion**; the blue overlay updates live.
+After the scan: live checkboxes for **visible windows**, types/roles, and **parent → child inclusion**; the blue overlay updates live.
 
 ---
 
@@ -148,7 +148,8 @@ Example a11y entry:
   "bbox": {"x": 10, "y": 20, "w": 80, "h": 24},
   "control_type": "Button",
   "class_name": "Button",
-  "name": "OK"
+  "name": "OK",
+  "window": "Notepad / Document - Notepad"
 }
 ```
 
