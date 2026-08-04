@@ -61,7 +61,7 @@ OUTPUT_DIR = os.path.join(os.path.expanduser("~"), "Desktop", "annotations")
 OVERLAY_COLOR = QColor(0, 255, 0, 220)
 YOLO_DISPLAY_COLOR = QColor(255, 140, 0, 220)
 A11Y_DISPLAY_COLOR = QColor(0, 120, 255, 220)
-FUSED_DISPLAY_COLOR = QColor(255, 255, 255, 230)
+FUSED_DISPLAY_COLOR = QColor(255, 0, 220, 230)  # magenta — readable on light UIs
 OVERLAY_LINE_WIDTH = 0
 OVERLAY_REFRESH_MS = 30
 LOOP_SLEEP = 0.01
@@ -1226,7 +1226,7 @@ _SAVE_BGR_COLORS = {
     "hover": (0, 255, 0),
     "yolo": (0, 140, 255),
     "a11y": (255, 120, 0),
-    "fused": (255, 255, 255),
+    "fused": (220, 0, 255),  # BGR magenta
 }
 
 

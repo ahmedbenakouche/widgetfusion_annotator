@@ -7,7 +7,7 @@ Desktop UI widget annotation from multiple sources: **hover diff**, **YOLO**, **
 | Hover | green |
 | YOLO | orange |
 | Accessibility | blue |
-| Fusion | white |
+| Fusion | magenta |
 
 ---
 
@@ -65,7 +65,7 @@ widgetfusion-annotator
 2. **Enter** advances phases: hover → YOLO → accessibility → review.
 3. **Accessibility** phase: scan, then a live filter dialog (windows, types/roles + inclusion).
 4. In **review**, **← / →** change the view (unless a manual selection is active):
-   - green = hover · orange = YOLO · blue = a11y · all stacked · white = fusion
+   - green = hover · orange = YOLO · blue = a11y · all stacked · magenta = fusion
 5. On the “all stacked” view, **Enter** opens fusion.
 6. **S** opens the save dialog (sources, path, JSON preview).
 7. Closing / canceling the methods dialog at startup exits the app.

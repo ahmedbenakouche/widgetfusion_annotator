@@ -512,7 +512,7 @@ class FusionConfigDialog(QDialog):
 
         layout = QVBoxLayout(self)
         layout.addWidget(QLabel(
-            "Adjust matching and priority: the white overlay updates live."
+            "Adjust matching and priority: the magenta overlay updates live."
         ))
         self._count_label = QLabel("")
         layout.addWidget(self._count_label)
@@ -901,7 +901,7 @@ SAVE_LAYER_LABELS: dict[str, str] = {
     "hover": "Hover (green)",
     "yolo": "YOLO (orange)",
     "a11y": "Accessibility (blue)",
-    "fused": "Fusion (white)",
+    "fused": "Fusion (magenta)",
 }
 
 
