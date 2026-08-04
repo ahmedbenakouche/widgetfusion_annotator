@@ -8,6 +8,7 @@ import threading
 import time
 from contextlib import contextmanager
 from datetime import datetime
+from statistics import median
 from pynput import keyboard, mouse
 from ultralytics import YOLO
 
@@ -61,7 +62,7 @@ OUTPUT_DIR = os.path.join(os.path.expanduser("~"), "Desktop", "annotations")
 OVERLAY_COLOR = QColor(0, 255, 0, 220)
 YOLO_DISPLAY_COLOR = QColor(255, 140, 0, 220)
 A11Y_DISPLAY_COLOR = QColor(0, 120, 255, 220)
-FUSED_DISPLAY_COLOR = QColor(255, 0, 220, 230)  # magenta — readable on light UIs
+FUSED_DISPLAY_COLOR = QColor(255, 0, 220, 230)
 OVERLAY_LINE_WIDTH = 0
 OVERLAY_REFRESH_MS = 30
 LOOP_SLEEP = 0.01
@@ -157,7 +158,6 @@ def _manual_clear_selection() -> None:
 
 
 def _manual_set_selection(indices: list[int], primary: int | None = None) -> None:
-    """Set multi-selection; primary keeps resize handles when exactly one is selected."""
     global manual_selected_index, manual_selected_indices
     uniq = sorted({int(i) for i in indices if i >= 0})
     manual_selected_indices = uniq
@@ -178,7 +178,6 @@ def _manual_selection_snap() -> dict:
 
 @contextmanager
 def pause_hover_diff():
-    """Stop hover-diff capture while a modal dialog is visible."""
     global HOVER_DIFF_PAUSED
     with state_lock:
         HOVER_DIFF_PAUSED = True
@@ -512,7 +511,6 @@ class OverlayWindow(QWidget):
                 boxes = active_boxes_list()
                 manual_history_push()
                 _manual_edit_undo_pushed = True
-                # Clicking a member of a multi-selection starts a group move.
                 group = (
                     hit_mode == "move"
                     and hit_index in selected_set
@@ -520,6 +518,7 @@ class OverlayWindow(QWidget):
                 )
                 if group:
                     _manual_set_selection(list(selected_set), primary=hit_index)
+                    print(f"  [=] Reference box #{hit_index}", flush=True)
                     manual_edit_mode = "move_group"
                     manual_edit_edges = set()
                     manual_edit_anchor = (x, y)
@@ -770,7 +769,6 @@ class OverlayWindow(QWidget):
                 if box_contains(box, item, margin=0)
             ]
             if enclosed:
-                # Marquee: select enclosed boxes instead of creating a new one.
                 _manual_set_selection(enclosed)
                 print(f"  [=] Selected {len(enclosed)} bbox(es)")
             else:
@@ -836,14 +834,40 @@ class OverlayWindow(QWidget):
                     and len(layers) == 1
                     and (idx in selected_set or (selected is not None and idx == selected))
                 )
-                show_handles = is_selected and len(selected_set) <= 1
-                if is_selected:
+                is_primary = (
+                    is_selected
+                    and selected is not None
+                    and idx == selected
+                )
+                show_handles = is_primary and len(selected_set) <= 1
+                if is_primary and len(selected_set) > 1:
+                    pen_sel = QPen(QColor(255, 220, 0, 255))
+                    pen_sel.setWidth(max(2, OVERLAY_LINE_WIDTH + 2))
+                    painter.setPen(pen_sel)
+                elif is_selected:
                     pen_sel = QPen(QColor(0, 200, 255, 240))
                     pen_sel.setWidth(max(1, OVERLAY_LINE_WIDTH + 1))
                     painter.setPen(pen_sel)
                 else:
                     painter.setPen(pen)
                 painter.drawRect(xd, yd, wd, hd)
+
+                if is_primary and len(selected_set) > 1:
+                    tick = max(6, int(round(8 * max(sx, sy))))
+                    tick_pen = QPen(QColor(255, 220, 0, 255))
+                    tick_pen.setWidth(max(2, OVERLAY_LINE_WIDTH + 2))
+                    painter.setPen(tick_pen)
+                    for hx, hy, dx, dy in [
+                        (xd, yd, tick, 0),
+                        (xd, yd, 0, tick),
+                        (xd + wd, yd, -tick, 0),
+                        (xd + wd, yd, 0, tick),
+                        (xd, yd + hd, tick, 0),
+                        (xd, yd + hd, 0, -tick),
+                        (xd + wd, yd + hd, -tick, 0),
+                        (xd + wd, yd + hd, 0, -tick),
+                    ]:
+                        painter.drawLine(hx, hy, hx + dx, hy + dy)
 
                 if show_handles:
                     handle_pen = QPen(QColor(0, 200, 255, 240))
@@ -891,11 +915,10 @@ class OverlayWindow(QWidget):
             )
 
         if preview is not None:
-            color = QColor(255, 60, 60, 230) if preview_erase else QColor(255, 255, 0, 220)
+            color = QColor(255, 60, 60, 230) if preview_erase else QColor(0, 200, 255, 220)
             pen_preview = QPen(color)
             pen_preview.setWidth(max(1, OVERLAY_LINE_WIDTH))
-            if preview_erase:
-                pen_preview.setStyle(Qt.PenStyle.DashLine)
+            pen_preview.setStyle(Qt.PenStyle.DashLine)
             painter.setPen(pen_preview)
             x, y, w, h = preview
             painter.drawRect(round(x * sx), round(y * sy), round(w * sx), round(h * sy))
@@ -1226,7 +1249,7 @@ _SAVE_BGR_COLORS = {
     "hover": (0, 255, 0),
     "yolo": (0, 140, 255),
     "a11y": (255, 120, 0),
-    "fused": (220, 0, 255),  # BGR magenta
+    "fused": (220, 0, 255),
 }
 
 
@@ -1389,7 +1412,6 @@ def screen_watcher():
             and not paused
         )
         if manual or not running or base_img is None or not hover_diff_ok:
-            # Drop transient state so the dialog itself is not a post-pause "new" widget.
             prev_mask_raw = None
             ignored_transient_mask = None
             time.sleep(0.05)
@@ -1971,6 +1993,155 @@ def nudge_selected_box(dx: int, dy: int) -> None:
         overlay_window.update()
 
 
+def _clamp_box_geom(x: int, y: int, w: int, h: int) -> tuple[int, int, int, int]:
+    w = max(1, min(int(w), CAPTURE_W))
+    h = max(1, min(int(h), CAPTURE_H))
+    x = max(0, min(int(x), CAPTURE_W - w))
+    y = max(0, min(int(y), CAPTURE_H - h))
+    return x, y, w, h
+
+
+def _set_box_geom(boxes: list, index: int, x: int, y: int, w: int, h: int) -> None:
+    x, y, w, h = _clamp_box_geom(x, y, w, h)
+    current = boxes[index]
+    if isinstance(current, dict):
+        current["x"] = x
+        current["y"] = y
+        current["w"] = w
+        current["h"] = h
+    else:
+        boxes[index] = (x, y, w, h)
+
+
+def _cluster_1d(
+    items: list[tuple[int, float]],
+    threshold: float,
+) -> list[list[int]]:
+    if not items:
+        return []
+    ordered = sorted(items, key=lambda t: t[1])
+    clusters: list[list[int]] = []
+    means: list[float] = []
+    for idx, coord in ordered:
+        placed = False
+        for c_i, mean in enumerate(means):
+            if abs(coord - mean) <= threshold:
+                group = clusters[c_i]
+                group.append(idx)
+                means[c_i] = (mean * (len(group) - 1) + coord) / len(group)
+                placed = True
+                break
+        if not placed:
+            clusters.append([idx])
+            means.append(coord)
+    return clusters
+
+
+def align_selected_boxes_to_primary() -> None:
+    """Align selection to primary: same w/h; keep centers on the free axis."""
+    with state_lock:
+        if not MANUAL_MODE:
+            return
+        if COMBINED_MODE and not combined_manual_editing_allowed(COMBINED_PHASE, COMBINED_VIEW):
+            return
+        indices = list(manual_selected_indices)
+        if not indices and manual_selected_index is not None:
+            indices = [manual_selected_index]
+        if len(indices) < 2:
+            print("  [align] Need at least 2 selected boxes.", flush=True)
+            return
+        primary = manual_selected_index
+        if primary is None or primary not in indices:
+            primary = indices[0]
+
+        boxes = active_boxes_list()
+        items: list[tuple[int, int, int, int, int, float, float]] = []
+        for i in indices:
+            if not (0 <= i < len(boxes)):
+                continue
+            x, y, w, h = box_coords(boxes[i])
+            items.append((i, x, y, w, h, x + w / 2.0, y + h / 2.0))
+        if len(items) < 2 or not any(i == primary for i, *_ in items):
+            return
+
+        ref = next(t for t in items if t[0] == primary)
+        _, rx, ry, rw, rh, rcx, rcy = ref
+        med_w = float(median([t[3] for t in items]))
+        med_h = float(median([t[4] for t in items]))
+        spread_x = max(t[5] for t in items) - min(t[5] for t in items)
+        spread_y = max(t[6] for t in items) - min(t[6] for t in items)
+        col_thresh = max(8.0, med_w * 0.55)
+        row_thresh = max(8.0, med_h * 0.55)
+
+        is_column = spread_x <= col_thresh
+        is_row = spread_y <= row_thresh
+
+        manual_history_push()
+        mode = "size"
+
+        if is_column and not is_row:
+            mode = "vertical"
+            for i, x, y, w, h, cx, cy in items:
+                ny = int(round(cy - rh / 2.0))
+                _set_box_geom(boxes, i, rx, ny, rw, rh)
+        elif is_row and not is_column:
+            mode = "horizontal"
+            for i, x, y, w, h, cx, cy in items:
+                nx = int(round(cx - rw / 2.0))
+                _set_box_geom(boxes, i, nx, ry, rw, rh)
+        elif is_column and is_row:
+            mode = "cluster"
+            for i, x, y, w, h, cx, cy in items:
+                _set_box_geom(boxes, i, rx, ry, rw, rh)
+        else:
+            mode = "grid"
+            col_clusters = _cluster_1d([(i, cx) for i, x, y, w, h, cx, cy in items], col_thresh)
+            row_clusters = _cluster_1d([(i, cy) for i, x, y, w, h, cx, cy in items], row_thresh)
+            idx_to_item = {t[0]: t for t in items}
+            col_of: dict[int, int] = {}
+            row_of: dict[int, int] = {}
+            for c_i, group in enumerate(col_clusters):
+                for idx in group:
+                    col_of[idx] = c_i
+            for r_i, group in enumerate(row_clusters):
+                for idx in group:
+                    row_of[idx] = r_i
+
+            ref_col = col_of.get(primary)
+            ref_row = row_of.get(primary)
+            if ref_col is None or ref_row is None:
+                for i, x, y, w, h, cx, cy in items:
+                    nx = int(round(cx - rw / 2.0))
+                    ny = int(round(cy - rh / 2.0))
+                    _set_box_geom(boxes, i, nx, ny, rw, rh)
+            else:
+                col_cx = {ref_col: rcx}
+                row_cy = {ref_row: rcy}
+                for i, x, y, w, h, cx, cy in items:
+                    c_i = col_of[i]
+                    r_i = row_of[i]
+                    if r_i == ref_row and c_i not in col_cx:
+                        col_cx[c_i] = cx
+                    if c_i == ref_col and r_i not in row_cy:
+                        row_cy[r_i] = cy
+                for c_i, group in enumerate(col_clusters):
+                    if c_i not in col_cx:
+                        col_cx[c_i] = float(median([idx_to_item[j][5] for j in group]))
+                for r_i, group in enumerate(row_clusters):
+                    if r_i not in row_cy:
+                        row_cy[r_i] = float(median([idx_to_item[j][6] for j in group]))
+
+                for i, x, y, w, h, cx, cy in items:
+                    nx = int(round(col_cx[col_of[i]] - rw / 2.0))
+                    ny = int(round(row_cy[row_of[i]] - rh / 2.0))
+                    _set_box_geom(boxes, i, nx, ny, rw, rh)
+
+        n = len(items)
+    print(f"  [align] {mode} — {n} box(es) → ref #{primary} ({rw}x{rh})", flush=True)
+    if overlay_window is not None:
+        overlay_window.update()
+
+
 def _is_ctrl_key(key) -> bool:
     return key in (keyboard.Key.ctrl, keyboard.Key.ctrl_l, keyboard.Key.ctrl_r)
 
@@ -1993,7 +2164,7 @@ def _ctrl_letter(key) -> str | None:
 
 
 def on_key_press(key):
-    """Keyboard handler: Enter / M / S / Q / arrows / Ctrl+Z / Ctrl+Y."""
+    """Keyboard handler: Enter / M / S / Q / A / arrows / Ctrl+Z / Ctrl+Y."""
     global _ctrl_pressed
     try:
         if _is_ctrl_key(key):
@@ -2047,6 +2218,19 @@ def on_key_press(key):
 
         if hasattr(key, "char") and key.char is not None:
             k = key.char.lower()
+            if k == "a":
+                with state_lock:
+                    can_align = (
+                        MANUAL_MODE
+                        and len(manual_selected_indices) >= 2
+                        and (
+                            not COMBINED_MODE
+                            or combined_manual_editing_allowed(COMBINED_PHASE, COMBINED_VIEW)
+                        )
+                    )
+                if can_align:
+                    align_selected_boxes_to_primary()
+                return
             if k == "m":
                 request_toggle_manual_mode()
                 return
@@ -2108,7 +2292,11 @@ def main():
             )
     elif sys.platform == "darwin":
         print("macOS: experimental support (no a11y).\n", flush=True)
-    print("Enter · step/fusion   M · manual   S · save   Q · quit   ←/→ · views   Ctrl+Z/Y · undo/redo\n", flush=True)
+    print(
+        "Enter · step/fusion   M · manual   S · save   Q · quit   "
+        "←/→ · views   A · align group   Ctrl+Z/Y · undo/redo\n",
+        flush=True,
+    )
 
     t = threading.Thread(target=screen_watcher, daemon=True)
     t.start()

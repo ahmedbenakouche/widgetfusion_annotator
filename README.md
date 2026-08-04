@@ -84,6 +84,7 @@ Shortcuts are captured globally and **suppressed for other apps** while the prog
 | **Q** | Quit |
 | **← / →** | Cycle review views |
 | **← ↑ → ↓** | In manual mode with a selection: move box(es) by 1 px |
+| **A** | In manual mode with a multi-selection: align group to the primary box |
 | **Ctrl+Z / Ctrl+Y** | In manual mode: undo / redo |
 
 ---
@@ -95,9 +96,10 @@ Available on a single-source view (not on “all stacked”).
 | Action | Effect |
 |--------|--------|
 | Left-click a box | Select / move / resize |
-| Left-drag on empty space | Multi-select boxes **fully enclosed** by the yellow rect; otherwise create a new box |
+| Left-drag on empty space | Multi-select boxes **fully enclosed** by the cyan dashed rect; otherwise create a new box |
 | Click + drag a member of a multi-selection | Move the whole group |
 | Arrow keys | Move selected box(es) rigidly by 1 px |
+| **A** (multi-selection) | Align to the **primary** box (yellow): same `w`/`h`; vertical → same `x`, keep each **center y**; horizontal → same `y`, keep each **center x**; grid → snap row/column **centers** from the primary |
 | Right-click the selection | Delete |
 | Right-drag | Erase boxes **fully enclosed** by the red rect |
 | Ctrl+Z / Ctrl+Y | Undo / redo |

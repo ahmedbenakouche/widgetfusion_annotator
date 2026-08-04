@@ -1943,7 +1943,6 @@ def _collect_atspi_boxes(
 ) -> None:
     window_origin: tuple[int, int] | None = None
     own_xid: int | None = None
-    # Keep a dedicated name: do not reuse for Atspi.Rect extents below.
     win_label = (window_label or "").strip() or UNKNOWN_WINDOW_LABEL
     if x11_stack is not None and x11_stack.ok and not is_shell and not is_desktop:
         try:
