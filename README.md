@@ -70,7 +70,7 @@ widgetfusion-annotator
 6. **S** opens the save dialog (sources, path, JSON preview).
 7. Closing / canceling the methods dialog at startup exits the app.
 
-Short status messages also appear at the bottom of the overlay (phase changes, scans, fusion, manual mode, save, etc.), so the terminal can stay hidden during capture.
+A short status line at the bottom of the overlay reports phase changes, scans, fusion, manual mode, save, and similar events.
 
 ---
 
