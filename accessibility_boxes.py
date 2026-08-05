@@ -503,7 +503,7 @@ def apply_a11y_filters(
     boxes: Sequence[A11yWidget] | List[A11yWidget],
     enabled_types: set[str] | frozenset[str] | None = None,
     enabled_windows: set[str] | frozenset[str] | None = None,
-    parent_inclusion: bool = True,
+    parent_inclusion: bool = False,
 ) -> List[A11yWidget]:
     """Filter raw a11y widgets by window, control type, and optional parent inclusion."""
     types = set(default_clickable_control_types()) if enabled_types is None else set(enabled_types)

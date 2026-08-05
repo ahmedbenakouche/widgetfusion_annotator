@@ -61,7 +61,7 @@ DEFAULT_FUSION_MIN_IOU = 0.5
 
 @dataclass
 class CombinedModeConfig:
-    enable_hover: bool = True
+    enable_hover: bool = False
     hover_autoscan: bool = False
     enable_yolo: bool = True
     enable_a11y: bool = True
@@ -384,7 +384,7 @@ class CombinedConfigDialog(QDialog):
         ))
 
         self.hover_cb = QCheckBox("Hover diff")
-        self.hover_cb.setChecked(True)
+        self.hover_cb.setChecked(False)
         layout.addWidget(self.hover_cb)
 
         hover_group = QGroupBox("Hover")
@@ -768,7 +768,7 @@ class A11yFilterDialog(QDialog):
         self._parent_cb = QCheckBox(
             "Inclusion (keep outer box, remove enclosed)"
         )
-        self._parent_cb.setChecked(True)
+        self._parent_cb.setChecked(False)
         self._parent_cb.stateChanged.connect(self._emit_preview)
         layout.addWidget(self._parent_cb)
 
