@@ -506,17 +506,34 @@ class OverlayWindow(QWidget):
         with state_lock:
             boxes = active_boxes_list()[:]
             selected_set = set(manual_selected_indices)
+            selected = manual_selected_index
 
         hit_index = None
         hit_mode = None
         hit_edges = set()
-        for i in range(len(boxes) - 1, -1, -1):
-            mode, edges = self._hit_test_box(x, y, box_coords(boxes[i]), MANUAL_HANDLE_RADIUS)
-            if mode is not None:
-                hit_index = i
+
+        # Resize only on the current single selection (nearby / nested boxes cannot steal it).
+        if (
+            selected is not None
+            and len(selected_set) <= 1
+            and 0 <= selected < len(boxes)
+        ):
+            mode, edges = self._hit_test_box(
+                x, y, box_coords(boxes[selected]), MANUAL_HANDLE_RADIUS
+            )
+            if mode == "resize":
+                hit_index = selected
                 hit_mode = mode
                 hit_edges = edges
-                break
+
+        # Select / move only on a strict interior hit (no edge slack around the bbox).
+        if hit_index is None:
+            for i in range(len(boxes) - 1, -1, -1):
+                if self._point_in_box(x, y, box_coords(boxes[i])):
+                    hit_index = i
+                    hit_mode = "move"
+                    hit_edges = set()
+                    break
 
         if hit_index is not None:
             with state_lock:
