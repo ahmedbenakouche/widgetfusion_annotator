@@ -141,7 +141,17 @@ _ctrl_pressed = False
 _manual_cursor_override_active = False
 _manual_edit_undo_pushed = False
 
-state_lock = threading.Lock()
+STATUS_MSG = ""
+STATUS_UNTIL = 0.0
+
+state_lock = threading.RLock()
+
+
+def show_status(msg: str, seconds: float = 2.5) -> None:
+    global STATUS_MSG, STATUS_UNTIL
+    with state_lock:
+        STATUS_MSG = str(msg)
+        STATUS_UNTIL = time.monotonic() + float(seconds)
 
 
 def _manual_clear_selection() -> None:
@@ -325,6 +335,7 @@ def manual_undo() -> None:
         _manual_edit_undo_pushed = False
         n = len(active_boxes_list())
     print(f"  [undo] — Total: {n}", flush=True)
+    show_status(f"Undo — {n} box(es)")
     if overlay_window is not None:
         overlay_window.update()
 
@@ -347,6 +358,7 @@ def manual_redo() -> None:
         _manual_edit_undo_pushed = False
         n = len(active_boxes_list())
     print(f"  [redo] — Total: {n}", flush=True)
+    show_status(f"Redo — {n} box(es)")
     if overlay_window is not None:
         overlay_window.update()
 
@@ -784,6 +796,7 @@ class OverlayWindow(QWidget):
         self.update()
 
     def paintEvent(self, event):
+        now = time.monotonic()
         with state_lock:
             layers = active_overlay_layers()
             running = RUNNING
@@ -798,6 +811,7 @@ class OverlayWindow(QWidget):
                 if COMBINED_FUSION_HIGHLIGHT_IDX >= 0
                 else []
             )
+            status = STATUS_MSG if now < STATUS_UNTIL else ""
 
         painter = QPainter(self)
         painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_Source)
@@ -811,7 +825,9 @@ class OverlayWindow(QWidget):
 
         has_highlight = fusion_highlight_idx >= 0 and fusion_clusters
         has_boxes = any(layer_boxes for layer_boxes, _ in layers)
-        if not (running or manual or has_highlight) or (not has_boxes and preview is None):
+        if not (running or manual or has_highlight or status) or (
+            not has_boxes and preview is None and not status
+        ):
             painter.end()
             return
 
@@ -927,6 +943,21 @@ class OverlayWindow(QWidget):
                     round(x * sx), round(y * sy), round(w * sx), round(h * sy),
                     QColor(255, 40, 40, 40),
                 )
+
+        if status:
+            banner_h = 36
+            margin = 16
+            banner_w = min(self.width() - 2 * margin, max(280, len(status) * 9 + 40))
+            bx = (self.width() - banner_w) // 2
+            by = self.height() - banner_h - margin
+            painter.fillRect(bx, by, banner_w, banner_h, QColor(0, 0, 0, 190))
+            painter.setFont(QFont("Segoe UI", 11, QFont.Weight.DemiBold))
+            painter.setPen(QColor(255, 255, 255))
+            painter.drawText(
+                bx, by, banner_w, banner_h,
+                int(Qt.AlignmentFlag.AlignCenter),
+                status,
+            )
 
         painter.end()
 
@@ -1258,6 +1289,7 @@ def save_results(selected: dict, base_img, output_dir: str = OUTPUT_DIR, separat
     flat = [box for boxes in selected.values() for box in boxes]
     if not flat:
         print("[!] No detections to save.")
+        show_status("Nothing to save")
         return None, None
 
     os.makedirs(output_dir, exist_ok=True)
@@ -1294,9 +1326,13 @@ def save_results(selected: dict, base_img, output_dir: str = OUTPUT_DIR, separat
         last = None
         for source, boxes in selected.items():
             last = _write_one(source, {source: boxes})
+        if last is not None:
+            show_status(f"Saved — {len(flat)} widget(s)", seconds=3.5)
         return last
 
-    return _write_one(None, selected)
+    result = _write_one(None, selected)
+    show_status(f"Saved — {len(flat)} widget(s)", seconds=3.5)
+    return result
 
 
 def _end_session_after_save() -> None:
@@ -1348,6 +1384,7 @@ def on_save_request() -> None:
     available = {k: v for k, v in available.items() if v}
     if not available:
         print("[!] No detections to save.")
+        show_status("Nothing to save")
         return
 
     img_h, img_w = base_img.shape[:2]
@@ -1495,11 +1532,13 @@ def yolo_sweeper():
         boxes = yolo_infer_boxes_bgr(base_img)
         if not boxes:
             print("YOLO autoscan: no detections.")
+            show_status("YOLO autoscan: no detections")
             with state_lock:
                 YOLO_AUTOSCAN = False
             continue
 
         print(f"YOLO autoscan: {len(boxes)} boxes.")
+        show_status(f"YOLO autoscan: {len(boxes)} box(es)")
 
         for box in boxes:
             with state_lock:
@@ -1526,6 +1565,7 @@ def _a11y_scan_worker(capture_left, capture_top, capture_width, capture_height):
     """Run UI Automation scan off the main keyboard thread."""
     global combined_a11y_boxes, combined_a11y_raw_boxes, A11Y_SCAN_PENDING
 
+    scan_failed = False
     try:
         raw = get_accessibility_boxes_raw(
             capture_left,
@@ -1535,7 +1575,9 @@ def _a11y_scan_worker(capture_left, capture_top, capture_width, capture_height):
         )
     except Exception as exc:
         print(f"[WARN] Accessibility scan failed: {exc}", flush=True)
+        show_status("Accessibility scan failed", seconds=3.5)
         raw = []
+        scan_failed = True
 
     filtered = apply_a11y_filters(raw)
     open_filter_ui = False
@@ -1548,6 +1590,8 @@ def _a11y_scan_worker(capture_left, capture_top, capture_width, capture_height):
                 f"(default filter, {len(raw)} raw).",
                 flush=True,
             )
+            if not scan_failed:
+                show_status(f"Accessibility: {len(filtered)} box(es)", seconds=3.0)
             open_filter_ui = True
         A11Y_SCAN_PENDING = False
 
@@ -1582,6 +1626,7 @@ def on_a11y_filter_request() -> None:
             )
         _preview_a11y_filters(filtered)
         print(f"Accessibility: {len(filtered)} box(es) after filters.", flush=True)
+        show_status(f"Accessibility: {len(filtered)} box(es) after filters", seconds=3.0)
     finally:
         if overlay_window is not None:
             overlay_window.set_click_through(not MANUAL_MODE)
@@ -1591,7 +1636,7 @@ def on_a11y_filter_request() -> None:
             overlay_window.update()
 
 
-def _print_combined_phase_help(phase: str) -> None:
+def _print_combined_phase_help(phase: str, status: str | None = None) -> None:
     labels = {
         "hover": "HOVER",
         "yolo": "YOLO",
@@ -1600,6 +1645,8 @@ def _print_combined_phase_help(phase: str) -> None:
     }
     if phase in labels:
         print(f"→ Phase {labels[phase]}", flush=True)
+        secs = 4.0 if phase == "a11y" else 2.8
+        show_status(status or f"Phase: {labels[phase].title()}", seconds=secs)
 
 
 def _begin_combined_phase(phase: str) -> None:
@@ -1609,10 +1656,12 @@ def _begin_combined_phase(phase: str) -> None:
     COMBINED_PHASE = phase
     YOLO_AUTOSCAN = False
     manual_history_clear()
+    status = None
 
     if phase == "hover":
         if COMBINED_CONFIG and COMBINED_CONFIG.hover_autoscan:
             YOLO_AUTOSCAN = True
+            status = "Phase: Hover — autoscan"
     elif phase == "yolo":
         with state_lock:
             base = initial_img
@@ -1620,8 +1669,10 @@ def _begin_combined_phase(phase: str) -> None:
             combined_yolo_boxes.clear()
             combined_yolo_boxes.extend(yolo_infer_boxes_bgr(base))
             print(f"YOLO: {len(combined_yolo_boxes)} box(es).", flush=True)
+            status = f"YOLO: {len(combined_yolo_boxes)} box(es)"
     elif phase == "a11y":
         A11Y_SCAN_PENDING = True
+        status = "Accessibility: scanning…"
         threading.Thread(
             target=_a11y_scan_worker,
             args=(CAPTURE_LEFT, CAPTURE_TOP, CAPTURE_W, CAPTURE_H),
@@ -1633,7 +1684,7 @@ def _begin_combined_phase(phase: str) -> None:
         if MANUAL_MODE and app_bridge is not None:
             app_bridge.manual_mode_signal.emit(False)
 
-    _print_combined_phase_help(phase)
+    _print_combined_phase_help(phase, status=status)
 
 
 def advance_combined_phase() -> None:
@@ -1644,6 +1695,7 @@ def advance_combined_phase() -> None:
             return
         if COMBINED_PHASE == "a11y" and A11Y_SCAN_PENDING:
             print("Accessibility scan in progress…", flush=True)
+            show_status("Accessibility scan in progress…")
             return
         if not COMBINED_PHASES_PENDING:
             if COMBINED_PHASE != "review":
@@ -1691,8 +1743,10 @@ def _apply_fusion_result(fused: list, priority: tuple | None = None) -> None:
 
     if priority is not None:
         print(f"Fusion: {count} box(es) ({_priority_label(priority)}).", flush=True)
+        show_status(f"Fusion: {count} box(es)", seconds=3.0)
     else:
         print(f"Fusion: {count} box(es).", flush=True)
+        show_status(f"Fusion: {count} box(es)", seconds=3.0)
 
 
 def on_combined_fusion_request() -> None:
@@ -1740,6 +1794,7 @@ def on_combined_fusion_request() -> None:
                 f"{' or 100% inclusion' if config.strict_inclusion else ''}).",
                 flush=True,
             )
+            show_status("No widgets to fuse", seconds=3.0)
             with state_lock:
                 combined_fused_boxes.clear()
                 combined_fused_boxes.extend(prev_fused)
@@ -1776,6 +1831,13 @@ def run_combined_auto_fusion() -> None:
 def combined_cycle_view(backward: bool = False) -> None:
     global COMBINED_VIEW
 
+    view_labels = {
+        "hover": "Hover",
+        "yolo": "YOLO",
+        "a11y": "Accessibility",
+        "all": "All sources",
+        "fused": "Fusion",
+    }
     disable_manual = False
     with state_lock:
         if not (COMBINED_MODE and COMBINED_PHASE == "review"):
@@ -1786,6 +1848,7 @@ def combined_cycle_view(backward: bool = False) -> None:
         if view == "all" and MANUAL_MODE:
             disable_manual = True
 
+    show_status(f"View: {view_labels.get(view, view)}")
     if disable_manual and app_bridge is not None:
         app_bridge.manual_mode_signal.emit(False)
 
@@ -1909,16 +1972,21 @@ def set_manual_mode(enabled: bool):
             enabled = False
         if enabled and COMBINED_MODE and not combined_manual_editing_allowed(COMBINED_PHASE, COMBINED_VIEW):
             enabled = False
+        prev = MANUAL_MODE
         MANUAL_MODE = bool(enabled)
         manual_drag_start = None
         manual_drag_kind = None
         manual_preview_box = None
         _manual_clear_selection()
         manual_history_clear()
+        on = MANUAL_MODE
+        changed = on != prev
 
     if overlay_window is not None:
         overlay_window.set_click_through(not MANUAL_MODE)
     _sync_manual_cursor()
+    if changed:
+        show_status("Manual mode ON" if on else "Manual mode OFF")
 
 
 def quit_program():
@@ -2049,6 +2117,7 @@ def align_selected_boxes_to_primary() -> None:
             indices = [manual_selected_index]
         if len(indices) < 2:
             print("  [align] Need at least 2 selected boxes.", flush=True)
+            show_status("Align: select at least 2 boxes")
             return
         primary = manual_selected_index
         if primary is None or primary not in indices:
@@ -2138,6 +2207,7 @@ def align_selected_boxes_to_primary() -> None:
 
         n = len(items)
     print(f"  [align] {mode} — {n} box(es) → ref #{primary} ({rw}x{rh})", flush=True)
+    show_status(f"Aligned ({mode}) — {n} box(es)")
     if overlay_window is not None:
         overlay_window.update()
 
