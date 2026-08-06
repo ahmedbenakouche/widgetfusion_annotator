@@ -512,7 +512,7 @@ class OverlayWindow(QWidget):
         hit_mode = None
         hit_edges = set()
 
-        # Resize only on the current single selection (nearby / nested boxes cannot steal it).
+        # Resize only on the current single selection
         if (
             selected is not None
             and len(selected_set) <= 1
@@ -526,7 +526,7 @@ class OverlayWindow(QWidget):
                 hit_mode = mode
                 hit_edges = edges
 
-        # Select / move only on a strict interior hit (no edge slack around the bbox).
+        # Select / move only on a strict interior hit
         if hit_index is None:
             for i in range(len(boxes) - 1, -1, -1):
                 if self._point_in_box(x, y, box_coords(boxes[i])):
@@ -1250,22 +1250,22 @@ def should_append_box(new_box, existing_boxes):
 
 
 def build_overlay_mask(shape):
-    """Mask overlay rectangles so the diff ignores them."""
+    """Mask only currently drawn overlay rects so the diff ignores them."""
     mask = np.zeros(shape[:2], dtype=np.uint8)
 
     with state_lock:
         running = RUNNING
-        items = (
-            combined_hover_boxes
-            + combined_yolo_boxes
-            + combined_a11y_boxes
-            + combined_fused_boxes
-        )
+        layers = active_overlay_layers() if running else []
 
-    if not running or not items:
+    if not running:
         return mask
 
-    thickness = OVERLAY_LINE_WIDTH + 2 * OVERLAY_IGNORE_MARGIN
+    items = [item for layer_boxes, _ in layers for item in layer_boxes]
+    if not items:
+        return mask
+
+    # Qt still draws a hairline when OVERLAY_LINE_WIDTH is 0.
+    thickness = max(1, OVERLAY_LINE_WIDTH + 2 * OVERLAY_IGNORE_MARGIN)
 
     for item in items:
         x, y, w, h = box_coords(item)
