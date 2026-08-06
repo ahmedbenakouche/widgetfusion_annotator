@@ -526,14 +526,22 @@ class OverlayWindow(QWidget):
                 hit_mode = mode
                 hit_edges = edges
 
-        # Select / move only on a strict interior hit
+        # Select / move: smallest box under the cursor (prefer nested child over parent).
         if hit_index is None:
-            for i in range(len(boxes) - 1, -1, -1):
-                if self._point_in_box(x, y, box_coords(boxes[i])):
-                    hit_index = i
-                    hit_mode = "move"
-                    hit_edges = set()
-                    break
+            best_i = None
+            best_area = None
+            for i, item in enumerate(boxes):
+                bx, by, bw, bh = box_coords(item)
+                if not self._point_in_box(x, y, (bx, by, bw, bh)):
+                    continue
+                area = max(1, bw) * max(1, bh)
+                if best_area is None or area < best_area or (area == best_area and i > best_i):
+                    best_i = i
+                    best_area = area
+            if best_i is not None:
+                hit_index = best_i
+                hit_mode = "move"
+                hit_edges = set()
 
         if hit_index is not None:
             with state_lock:
