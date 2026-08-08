@@ -805,13 +805,13 @@ class A11yFilterDialog(QDialog):
         type_layout = QVBoxLayout(type_group)
 
         btn_row = QHBoxLayout()
-        btn_default = QPushButton("Clickable (default)")
+        btn_clickable = QPushButton("Clickable")
         btn_all = QPushButton("All")
         btn_none = QPushButton("None")
-        btn_default.clicked.connect(self._select_clickable)
+        btn_clickable.clicked.connect(self._select_clickable)
         btn_all.clicked.connect(lambda: self._set_all_types(True))
         btn_none.clicked.connect(lambda: self._set_all_types(False))
-        btn_row.addWidget(btn_default)
+        btn_row.addWidget(btn_clickable)
         btn_row.addWidget(btn_all)
         btn_row.addWidget(btn_none)
         type_layout.addLayout(btn_row)
@@ -823,7 +823,7 @@ class A11yFilterDialog(QDialog):
         host_layout = QVBoxLayout(host)
         for control_type, n in sorted(counts.items(), key=lambda t: (-t[1], t[0])):
             cb = QCheckBox(f"{control_type}  ({n})")
-            cb.setChecked(control_type in default_clickable_control_types())
+            cb.setChecked(True)
             cb.stateChanged.connect(self._emit_preview)
             self._type_checks[control_type] = cb
             host_layout.addWidget(cb)

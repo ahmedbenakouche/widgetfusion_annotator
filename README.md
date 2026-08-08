@@ -118,7 +118,7 @@ Resize handles appear only when **exactly one** box is selected.
 | **Linux** | AT-SPI2 (PyGObject) — **X11** session recommended | ✓ |
 | **macOS** | Not available | — |
 
-After the scan: live checkboxes for **visible windows**, types/roles, and **Inclusion (keep outer box, remove enclosed)**; the blue overlay updates live.
+After the scan: live checkboxes for **visible windows**, types/roles (**All** by default; **Clickable** is a shortcut), and **Inclusion (keep outer box, remove enclosed)**; the blue overlay updates live.
 
 ---
 

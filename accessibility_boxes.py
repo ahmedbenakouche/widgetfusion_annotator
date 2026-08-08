@@ -307,7 +307,7 @@ def get_accessibility_boxes(
     capture_width: int,
     capture_height: int,
 ) -> List[A11yWidget]:
-    """Return accessibility widgets after default filters (clickable + parent inclusion)."""
+    """Return accessibility widgets after default filters (all types, no parent inclusion)."""
     raw = get_accessibility_boxes_raw(
         capture_left, capture_top, capture_width, capture_height
     )
@@ -440,20 +440,21 @@ def _a11y_near_duplicate(a: A11yWidget, b: A11yWidget) -> bool:
     """
     True when two boxes are the same control reported twice with a small offset.
 
-    Common on GNOME Files (Nautilus): two table-cell nodes, same name/size,
-    shifted by a few pixels (focus/selection chrome vs icon cell).
+    Same type only for near matches: otherwise unchecking TreeItem can leave a
+    sibling Tree/DataItem that was silently merged (box looks “re-aligned”).
+    Exact identical rects may still collapse across types.
     """
     ab = a11y_box_coords(a)
     bb = a11y_box_coords(b)
     if ab == bb:
         return True
-    iou = _box_iou_xywh(ab, bb)
-    if iou >= 0.88:
-        return True
     ra = str(a.get("control_type") or "")
     rb = str(b.get("control_type") or "")
     if ra != rb:
         return False
+    iou = _box_iou_xywh(ab, bb)
+    if iou >= 0.88:
+        return True
     na = str(a.get("name") or "").strip()
     nb = str(b.get("name") or "").strip()
     if not na or na != nb:
@@ -506,8 +507,11 @@ def apply_a11y_filters(
     parent_inclusion: bool = False,
 ) -> List[A11yWidget]:
     """Filter raw a11y widgets by window, control type, and optional parent inclusion."""
-    types = set(default_clickable_control_types()) if enabled_types is None else set(enabled_types)
-    filtered = [b for b in boxes if str(b.get("control_type") or "") in types]
+    if enabled_types is None:
+        filtered = list(boxes)
+    else:
+        types = set(enabled_types)
+        filtered = [b for b in boxes if str(b.get("control_type") or "") in types]
     if enabled_windows is not None:
         filtered = [b for b in filtered if a11y_window_label(b) in enabled_windows]
     if parent_inclusion:
