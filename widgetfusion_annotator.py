@@ -136,6 +136,7 @@ MANUAL_NUDGE_PX = 1
 MANUAL_HISTORY_MAX = 50
 manual_undo_stack: list = []
 manual_redo_stack: list = []
+manual_clipboard: list = []
 _manual_nudge_batch = False
 _ctrl_pressed = False
 _manual_cursor_override_active = False
@@ -2045,6 +2046,75 @@ def _is_enter_key(key) -> bool:
     return getattr(key, "name", None) in ("enter", "numpad_enter")
 
 
+def manual_copy_selection() -> None:
+    global manual_clipboard
+    with state_lock:
+        if not MANUAL_MODE:
+            return
+        if COMBINED_MODE and not combined_manual_editing_allowed(COMBINED_PHASE, COMBINED_VIEW):
+            return
+        indices = list(manual_selected_indices)
+        if not indices and manual_selected_index is not None:
+            indices = [manual_selected_index]
+        boxes = active_boxes_list()
+        clips = [
+            copy.deepcopy(boxes[i])
+            for i in sorted(indices)
+            if 0 <= i < len(boxes)
+        ]
+        if not clips:
+            return
+        manual_clipboard = clips
+        n = len(clips)
+    print(f"  [copy] {n} box(es)", flush=True)
+    show_status(f"Copied {n} box(es)")
+
+
+def manual_paste_clipboard() -> None:
+    cx, cy = get_cursor_capture_coords()
+    with state_lock:
+        if not MANUAL_MODE:
+            return
+        if COMBINED_MODE and not combined_manual_editing_allowed(COMBINED_PHASE, COMBINED_VIEW):
+            return
+        if not manual_clipboard:
+            show_status("Clipboard empty")
+            return
+        origins = [box_coords(item) for item in manual_clipboard]
+        min_x = min(ox for ox, oy, ow, oh in origins)
+        min_y = min(oy for ox, oy, ow, oh in origins)
+        dx = cx - min_x
+        dy = cy - min_y
+        lo_dx = max(-ox for ox, oy, ow, oh in origins)
+        hi_dx = min(CAPTURE_W - ow - ox for ox, oy, ow, oh in origins)
+        lo_dy = max(-oy for ox, oy, ow, oh in origins)
+        hi_dy = min(CAPTURE_H - oh - oy for ox, oy, ow, oh in origins)
+        dx = int(max(lo_dx, min(hi_dx, dx)))
+        dy = int(max(lo_dy, min(hi_dy, dy)))
+
+        manual_history_push()
+        boxes = active_boxes_list()
+        new_indices: list[int] = []
+        for item, (ox, oy, ow, oh) in zip(manual_clipboard, origins):
+            x, y, w, h = _clamp_box_geom(ox + dx, oy + dy, ow, oh)
+            if isinstance(item, dict):
+                new_item = copy.deepcopy(item)
+                new_item["x"] = x
+                new_item["y"] = y
+                new_item["w"] = w
+                new_item["h"] = h
+            else:
+                new_item = (int(x), int(y), int(w), int(h))
+            boxes.append(new_item)
+            new_indices.append(len(boxes) - 1)
+        _manual_set_selection(new_indices, primary=new_indices[0])
+        n = len(new_indices)
+    print(f"  [paste] {n} box(es) @ cursor", flush=True)
+    show_status(f"Pasted {n} box(es)")
+    if overlay_window is not None:
+        overlay_window.update()
+
+
 def nudge_selected_box(dx: int, dy: int) -> None:
     """Move selected manual bbox(es) by (dx, dy), rigidly clamped to capture bounds."""
     with state_lock:
@@ -2242,12 +2312,16 @@ def _is_ctrl_key(key) -> bool:
 
 
 def _ctrl_letter(key) -> str | None:
-    """Return 'z' / 'y' for Ctrl+letter, including Windows control codes."""
+    """Return letter for Ctrl+key, including Windows control codes."""
     ch = getattr(key, "char", None)
     if ch == "\x1a":
         return "z"
     if ch == "\x19":
         return "y"
+    if ch == "\x03":
+        return "c"
+    if ch == "\x16":
+        return "v"
     if isinstance(ch, str) and len(ch) == 1 and ch.isalpha():
         return ch.lower()
     vk = getattr(key, "vk", None)
@@ -2255,11 +2329,15 @@ def _ctrl_letter(key) -> str | None:
         return "z"
     if vk in (89, 0x59):  # Y
         return "y"
+    if vk in (67, 0x43):  # C
+        return "c"
+    if vk in (86, 0x56):  # V
+        return "v"
     return None
 
 
 def on_key_press(key):
-    """Keyboard handler: Enter / M / S / Q / A / arrows / Ctrl+Z / Ctrl+Y."""
+    """Keyboard handler: Enter / M / S / Q / A / arrows / Ctrl+Z/Y/C/V."""
     global _ctrl_pressed
     try:
         if _is_ctrl_key(key):
@@ -2279,6 +2357,18 @@ def on_key_press(key):
                     in_manual = MANUAL_MODE
                 if in_manual:
                     manual_redo()
+                return
+            if letter == "c":
+                with state_lock:
+                    in_manual = MANUAL_MODE
+                if in_manual:
+                    manual_copy_selection()
+                return
+            if letter == "v":
+                with state_lock:
+                    in_manual = MANUAL_MODE
+                if in_manual:
+                    manual_paste_clipboard()
                 return
 
         if _is_enter_key(key):

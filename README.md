@@ -88,6 +88,7 @@ Shortcuts are captured globally and **suppressed for other apps** while the prog
 | **← ↑ → ↓** | In manual mode with a selection: move box(es) by 1 px |
 | **A** | In manual mode with a multi-selection: align group to the primary box |
 | **Ctrl+Z / Ctrl+Y** | In manual mode: undo / redo |
+| **Ctrl+C / Ctrl+V** | In manual mode: copy / paste selected box(es) |
 
 ---
 
@@ -105,6 +106,7 @@ Available on a single-source view (not on “all stacked”).
 | Right-click the selection | Delete |
 | Right-drag | Erase boxes **fully enclosed** by the red rect |
 | Ctrl+Z / Ctrl+Y | Undo / redo |
+| Ctrl+C / Ctrl+V | Copy / paste selected box(es) at the cursor |
 
 Resize handles appear only when **exactly one** box is selected.
 
